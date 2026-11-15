@@ -23,6 +23,15 @@
 
     <div id="banner" class="banner" hidden></div>
 
+    <div id="onboarding" class="onboard" hidden role="dialog" aria-labelledby="ob-title">
+      <p class="ob-title" id="ob-title"></p>
+      <p class="ob-sub" id="ob-sub"></p>
+      <div class="ob-actions">
+        <button id="ob-no" class="btn subtle">Not now</button>
+        <button id="ob-yes" class="btn primary"></button>
+      </div>
+    </div>
+
     <main id="list" aria-live="polite"></main>
 
     <div id="empty" class="empty" hidden>
@@ -57,8 +66,9 @@
       <div class="group">
         <div class="label">Window</div>
         <label class="switch-row"><span>Keep on top of other windows</span><input type="checkbox" role="switch" data-setting="alwaysOnTop"></label>
-        <label class="switch-row"><span>Start when I log in</span><input type="checkbox" role="switch" data-setting="openAtLogin"></label>
-        <p class="note" id="login-note" hidden>Takes effect in the installed app (not when running from source).</p>
+        <label class="switch-row" id="login-row"><span>Start when I log in</span><input type="checkbox" role="switch" id="login-switch"></label>
+        <p class="note" id="login-note" hidden></p>
+        <button id="btn-login-items" class="link" hidden></button>
       </div>
 
       <div class="group">

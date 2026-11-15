@@ -7,6 +7,7 @@ A small, always-on-top desktop widget that shows live progress of every Claude C
 - Light and dark themes (or follow the OS), switchable from the header.
 - Minimises to a pill: `4 agents` with tiny per-agent bars, solid orange `infra-cli needs you` with an Open button, or `All 4 agents finished`. Position, size and minimised state are remembered.
 - Settings panel (gear icon): theme, which notifications you get, sound, keep on top, start at login.
+- A friendly first-run card asks whether to start at login, then offers to connect Claude Code (install hooks).
 - Tray / menu-bar icon to show or hide the widget, open settings, toggle sound, install or uninstall hooks, and quit.
 - Runs fully locally: the only network traffic is the hook talking to `127.0.0.1`.
 
@@ -40,6 +41,15 @@ npm run simulate:hook     # same, but every event goes through the real hook scr
 The showcase puts six agents on screen: working with a 3/5 plan, working without a to-do list (sweeping bar), needs permission, asks a question, finished (`Finished · 4m 12s`), and stopped (`Stopped · error`). It previews the light and dark themes twice (`--cycles=N`, `--hold=ms`), then returns to your saved theme. The preview doesn't change your setting.
 
 The simulation includes TodoWrite progress, Task-tool progress, subagents, a permission request (approved after ~10s), a question, a finished turn, an API error, and a session that ends and fades out. You get native notifications for the permission request, the question, the finishes and the error.
+
+## First run
+
+The first time the **installed** app starts, a small card inside the widget asks:
+
+1. **"Start Agent Cody automatically when you log in?"** Yes / Not now. It asks only once. From then on, the choice lives in Settings.
+2. **"Connect Claude Code?"** Install hooks / Not now. This only appears if the hooks aren't installed yet, and installs them with the same safe merge described below.
+
+Nothing is turned on silently. If you never answer Yes, Agent Cody doesn't start at login. When running from source (`npm start`) the card doesn't appear. Set `AGENT_CODY_FORCE_ONBOARDING=1` to preview it.
 
 ## Install the Claude Code hooks
 
@@ -109,9 +119,17 @@ Row states:
 | Notify when an agent finishes | Off |
 | Play a sound | On |
 | Keep on top of other windows | On |
-| Start when I log in (installed app only; never registers the dev build) | On |
+| Start when I log in | Off, unless you said Yes on first launch |
 
-All settings persist between launches. The Settings panel also shows hook status, with Install/Reinstall/Uninstall buttons.
+All settings persist between launches.
+
+**Start when I log in** always shows the real system state: the switch is re-read from macOS or Windows every time Settings opens. If you remove Agent Cody in macOS **System Settings › General › Login Items** or Windows **Settings › Apps › Startup** (or Task Manager), the switch shows off. Turning it on registers the login item; turning it off removes it. A link under the switch opens the system page. In dev mode the switch is disabled with the note "Only works in the installed app".
+
+When started automatically at login, Agent Cody starts quietly. It never takes focus and comes back exactly as you left it: expanded, minimised to the pill, or hidden in the tray. When you start it yourself, it opens normally. Only one copy ever runs, so starting it again just brings the widget forward.
+
+How it works: `src/main/login-item.js` wraps Electron's `app.setLoginItemSettings` / `getLoginItemSettings`.
+- **macOS:** registers through SMAppService and uses `status` and `wasOpenedAtLogin`.
+- **Windows:** writes a per-user Run entry (no admin) for the installed exe with a `--login` argument, which is how a login start is detected. It uses `executableWillLaunchAtLogin` so entries you disabled show as off. If the entry points at an old exe path, it's re-pointed on startup. The Settings panel also shows hook status, with Install/Reinstall/Uninstall buttons.
 
 ### Open behaviour
 
@@ -155,7 +173,7 @@ npm run pack       # unpacked app for the current OS, for quick testing
 ```
 
 - **macOS:** builds are unsigned unless you configure signing (`CSC_LINK` / `CSC_KEY_PASSWORD`, plus notarization). For an unsigned app, right-click → **Open** the first time. Build for Intel with `npx electron-builder --mac --x64`.
-- **Windows:** build on Windows for the most reliable result. Building from macOS works for `--dir` and portable targets, but the NSIS installer and icon editing may need Wine. Without a code-signing certificate, SmartScreen warns on first run.
+- **Windows:** the NSIS installer installs per user (`%LOCALAPPDATA%\Programs\agent-cody`, no admin rights). Updates install to the same folder, so the start-at-login entry keeps working. The portable build registers its own `.exe` location (`PORTABLE_EXECUTABLE_FILE`), so keep that file in one place. Build on Windows for the most reliable result. Building from macOS works for `--dir` and portable targets, but the NSIS installer and icon editing may need Wine. Without a code-signing certificate, SmartScreen warns on first run.
 
 ## How it works
 
@@ -192,6 +210,7 @@ Everything stays on your machine. The hook sends only the session id, project pa
 - **The hook needs Node.js.** The installer records the absolute path to `node`. For version managers (nvm, fnm, volta, asdf…) it records plain `node`, so it follows your active version. If Node isn't found, the hook fails silently and the widget stays empty.
 - **Interrupts:** pressing Esc doesn't fire `Stop`. Agent Cody only sees an interrupt if a tool was running (`PostToolUseFailure` with `is_interrupt`). Otherwise the row shows *working* until the next event, or `Stopped · no updates` after `staleMinutes`.
 - **"Needs permission" clears** when Claude continues (the next tool event, prompt or stop) or when you press Open. Pressing Open counts as handled even if you didn't answer in the terminal.
+- **Start at login on macOS** needs a signed and notarized app to work reliably (Electron's docs say unsigned builds may silently fail). If macOS reports *requires approval*, the Settings switch says so and links to Login Items. If the system rejects the item, the switch snaps back to off with a message. It never pretends.
 - **Start when I log in** only applies to the installed app. Running from source never registers a login item.
 - **Theme preview:** the showcase's light/dark preview overrides the display only. Your saved theme is restored when the showcase ends, or when you change the theme.
 - **Sessions that started before the app** appear on their next event. Their step progress fills in at the next plan update.

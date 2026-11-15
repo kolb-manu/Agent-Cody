@@ -14,7 +14,9 @@ test('defaults: system theme, finished notifications off, everything else on', (
   assert.deepEqual(s.get('notify'), { attention: true, stopped: true, finished: false });
   assert.equal(s.get('sound'), true);
   assert.equal(s.get('alwaysOnTop'), true);
-  assert.equal(s.get('openAtLogin'), true);
+  assert.equal(s.get('openAtLogin'), undefined, 'login item is read from the OS, never stored');
+  assert.deepEqual(s.get('onboarding'), { loginAsked: false, hooksAsked: false });
+  assert.equal(s.get('hidden'), false);
 });
 
 test('migrates v0.1 settings (muted / notifyOn) without losing window state', () => {
@@ -35,6 +37,15 @@ test('migrates v0.1 settings (muted / notifyOn) without losing window state', ()
   assert.equal(saved.notifyOn, undefined);
 });
 
+test('migrate drops the old silently-on openAtLogin so the user gets asked', () => {
+  const d = dir();
+  fs.writeFileSync(path.join(d, 'settings.json'), JSON.stringify({ theme: 'dark', openAtLogin: true }));
+  const s = new Settings(d);
+  assert.equal(s.get('openAtLogin'), undefined);
+  assert.equal(s.get('onboarding').loginAsked, false);
+  assert.equal(s.get('theme'), 'dark');
+});
+
 test('migrate leaves current-format settings alone', () => {
   const cur = { theme: 'dark', sound: false, notify: { attention: false, stopped: true, finished: true } };
   assert.deepEqual(migrate(cur), cur);
@@ -48,6 +59,7 @@ test('setUser validates keys and values and persists', () => {
   assert.equal(s.setUser('notify.finished', true), true);
   assert.equal(s.setUser('port', 1), false, 'port is not UI-editable');
   assert.equal(s.setUser('sound', 'yes'), false);
+  assert.equal(s.setUser('openAtLogin', true), false, 'login item goes through the OS helper, not settings');
   s.flush();
   const again = new Settings(d);
   assert.equal(again.get('theme'), 'light');

@@ -14,4 +14,8 @@ contextBridge.exposeInMainWorld('cody', {
   dismiss: (id) => ipcRenderer.send('dismiss', id),
   open: (id) => ipcRenderer.invoke('open', id),
   setSetting: (key, value) => ipcRenderer.invoke('set-setting', key, value),
+  setLoginItem: (on) => ipcRenderer.invoke('set-login-item', on),
+  refreshUiState: () => ipcRenderer.send('refresh-ui-state'),
+  openLoginItems: () => ipcRenderer.send('open-login-items'),
+  answerOnboarding: (step, yes) => ipcRenderer.send('onboarding-answer', step, yes),
 });

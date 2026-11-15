@@ -218,13 +218,62 @@ function renderView() {
   els.btnSettings.classList.toggle('active', inSettings);
   els.btnSettings.setAttribute('aria-pressed', String(inSettings));
   const needsHooks = ui.hookStatus !== 'installed';
-  els.btnInstall.hidden = !needsHooks;
+  renderOnboarding(inSettings);
+  els.btnInstall.hidden = !needsHooks || ui.onboarding === 'hooks';
   if (needsHooks) {
     els.emptyText.textContent = ui.hookStatus === 'partial'
       ? 'Some Claude Code hooks are missing. Reinstall them to see all activity.'
       : 'Connect Claude Code by installing the Agent Cody hooks.';
   } else {
     els.emptyText.innerHTML = 'No agents running. Start <code>claude</code> in a terminal and it shows up here.';
+  }
+}
+
+const ONBOARDING = {
+  login: () => ({
+    title: 'Start Agent Cody automatically when you log in?',
+    sub: `It waits quietly in the ${ui.platform === 'darwin' ? 'menu bar' : 'system tray'} until an agent needs you. You can change this in Settings any time.`,
+    yes: 'Yes',
+  }),
+  hooks: () => ({
+    title: 'Connect Claude Code?',
+    sub: 'Adds Agent Cody’s hooks to ~/.claude/settings.json so your sessions show up here. The file is backed up first and your existing hooks stay.',
+    yes: 'Install hooks',
+  }),
+};
+
+function renderOnboarding(inSettings) {
+  const card = $('onboarding');
+  const step = ui.onboarding && ONBOARDING[ui.onboarding] ? ui.onboarding : null;
+  card.hidden = !step || inSettings;
+  if (!step) return;
+  const c = ONBOARDING[step]();
+  $('ob-title').textContent = c.title;
+  $('ob-sub').textContent = c.sub;
+  $('ob-yes').textContent = c.yes;
+  card.dataset.step = step;
+}
+
+function renderLoginItem() {
+  const li = ui.loginItem || { supported: false, enabled: false };
+  const sw = $('login-switch');
+  const note = $('login-note');
+  const link = $('btn-login-items');
+  sw.disabled = !li.supported;
+  sw.checked = Boolean(li.enabled);
+  $('login-row').classList.toggle('disabled', !li.supported);
+  link.hidden = true;
+  if (!li.supported) {
+    note.hidden = false; note.textContent = 'Only works in the installed app.';
+  } else if (li.requiresApproval) {
+    note.hidden = false; note.textContent = 'Waiting for your approval in System Settings › Login Items.';
+    link.hidden = false; link.textContent = 'Open Login Items';
+  } else if (li.error) {
+    note.hidden = false; note.textContent = `Couldn’t read the login item (${li.error}).`;
+  } else {
+    note.hidden = true;
+    link.hidden = false;
+    link.textContent = ui.platform === 'darwin' ? 'Manage in System Settings' : 'Manage in Startup apps';
   }
 }
 
@@ -242,7 +291,7 @@ function renderUi() {
     const k = input.dataset.setting;
     input.checked = k.startsWith('notify.') ? Boolean((ui.notify || {})[k.slice(7)]) : Boolean(ui[k]);
   }
-  $('login-note').hidden = ui.loginItemSupported !== false;
+  renderLoginItem();
   const hs = $('hook-status');
   hs.textContent = { installed: 'Installed', partial: 'Partly installed', 'not-installed': 'Not installed', error: 'settings.json unreadable' }[ui.hookStatus] || ui.hookStatus;
   hs.className = `hook-status ${ui.hookStatus === 'installed' ? 'ok' : 'warn'}`;
@@ -275,8 +324,22 @@ $('btn-min').innerHTML = ICON.chevron;
 $('btn-back').innerHTML = ICON.back;
 
 els.btnTheme.addEventListener('click', () => cody.setSetting('theme', ui.resolvedTheme === 'light' ? 'dark' : 'light'));
-els.btnSettings.addEventListener('click', () => { view = view === 'settings' ? 'list' : 'settings'; renderView(); });
-$('btn-back').addEventListener('click', () => { view = 'list'; renderView(); });
+function setView(v) {
+  view = v;
+  if (v === 'settings') cody.refreshUiState(); // re-read the real login-item state from the OS
+  renderView();
+}
+els.btnSettings.addEventListener('click', () => setView(view === 'settings' ? 'list' : 'settings'));
+window.addEventListener('focus', () => { if (view === 'settings') cody.refreshUiState(); });
+$('login-switch').addEventListener('change', async (e) => {
+  const want = e.target.checked;
+  const r = await cody.setLoginItem(want);
+  if (r) e.target.checked = Boolean(r.enabled); // show what the OS actually did
+});
+$('btn-login-items').addEventListener('click', () => cody.openLoginItems());
+$('ob-yes').addEventListener('click', () => cody.answerOnboarding($('onboarding').dataset.step, true));
+$('ob-no').addEventListener('click', () => cody.answerOnboarding($('onboarding').dataset.step, false));
+$('btn-back').addEventListener('click', () => setView('list'));
 $('btn-min').addEventListener('click', () => cody.toggleCollapse());
 $('pill-main').addEventListener('click', () => cody.toggleCollapse());
 els.pillOpen.addEventListener('click', () => openSession(els.pillOpen.dataset.id));
@@ -291,7 +354,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && view ===
 cody.onSessions((list) => { sessions = list; render(); });
 cody.onUiState((s) => { ui = s; renderUi(); render(); });
 cody.onToast((msg) => toast(msg));
-cody.onShowSettings(() => { view = 'settings'; renderView(); });
+cody.onShowSettings(() => setView('settings'));
 cody.onReveal((id) => {
   view = 'list'; renderView();
   const entry = rows.get(id);

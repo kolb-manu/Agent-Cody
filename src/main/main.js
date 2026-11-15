@@ -9,6 +9,7 @@ const { Notifier } = require('./notifier');
 const { focusSession } = require('./focus');
 const { mascotPNG } = require('./icon-draw');
 const hooks = require('./hooks-installer');
+const { createLoginItem, LOGIN_ARG } = require('./login-item');
 
 const IS_MAC = process.platform === 'darwin';
 const IS_WIN = process.platform === 'win32';
@@ -30,6 +31,8 @@ let settings, store, notifier;
 let serverError = null;
 let hookStatus = 'not-installed';
 let previewTheme = null; // transient theme override from the simulator showcase
+let openedAtLogin = false;
+const loginItem = createLoginItem({ app });
 const icons = {};
 
 // ---------- theme ----------
@@ -121,7 +124,17 @@ function createWindow() {
   });
   applyAlwaysOnTop();
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
-  win.once('ready-to-show', () => win.showInactive());
+  win.once('ready-to-show', () => {
+    if (openedAtLogin) {
+      // Automatic start: quiet. Restore the last state (expanded/pill/hidden) without taking focus.
+      if (!settings.get('hidden')) win.showInactive();
+    } else {
+      win.show(); // manual start: behave normally
+    }
+  });
+  // Remember whether the widget was hidden to the tray (not when hiding because we're quitting).
+  win.on('hide', () => { if (!quitting) { settings.set('hidden', true); updateTrayMenu(); } });
+  win.on('show', () => { settings.set('hidden', false); updateTrayMenu(); });
   // Dev/testing: AGENT_CODY_SCREENSHOT='[{"file":"a.png","at":3000,"js":"optional UI action"}]'
   // writes captures of the widget (used to check the UI without clicking).
   if (process.env.AGENT_CODY_SCREENSHOT) {
@@ -197,7 +210,14 @@ function scheduleSessionsSend() {
   }, 60);
 }
 
-function loginItemSupported() { return app.isPackaged && (IS_MAC || IS_WIN); }
+/** Which first-run question to show inside the widget, if any. Installed app only. */
+function onboardingStep() {
+  if (!app.isPackaged && process.env.AGENT_CODY_FORCE_ONBOARDING !== '1') return null;
+  const ob = settings.get('onboarding') || {};
+  if (!ob.loginAsked) return 'login';
+  if (!ob.hooksAsked && hookStatus !== 'installed') return 'hooks';
+  return null;
+}
 
 function sendUiState() {
   if (!win || win.isDestroyed()) return;
@@ -208,8 +228,8 @@ function sendUiState() {
     sound: settings.get('sound') !== false,
     notify: settings.get('notify'),
     alwaysOnTop: settings.get('alwaysOnTop') !== false,
-    openAtLogin: settings.get('openAtLogin') !== false,
-    loginItemSupported: loginItemSupported(),
+    loginItem: loginItem.get(), // read from the OS every time, never cached
+    onboarding: onboardingStep(),
     hookStatus,
     port: settings.get('port'),
     serverError,
@@ -301,18 +321,52 @@ function updateTrayMenu() {
 
 // ---------- settings ----------
 
-function applyLoginItem() {
-  if (!loginItemSupported()) return; // never register the dev Electron binary as a login item
-  try {
-    app.setLoginItemSettings({ openAtLogin: settings.get('openAtLogin') !== false });
-  } catch (err) { console.error('[agent-cody] login item:', err.message); }
+/** Turn "Start when I log in" on/off and report what the OS actually did. */
+function setLoginItem(on) {
+  const r = loginItem.set(Boolean(on));
+  if (!r.supported) sendToRenderer('toast', 'Start at login only works in the installed app.');
+  else if (r.error) sendToRenderer('toast', `Couldn’t change the login item: ${r.error}`);
+  else if (on && r.requiresApproval) sendToRenderer('toast', 'Almost there: allow Agent Cody in System Settings › General › Login Items.');
+  else if (on && !r.enabled) sendToRenderer('toast', 'The system didn’t accept the login item. On macOS this needs a signed app.');
+  sendUiState();
+  return r;
+}
+
+function openLoginItemsSettings() {
+  const url = IS_MAC ? 'x-apple.systempreferences:com.apple.LoginItems-Settings.extension' : IS_WIN ? 'ms-settings:startupapps' : null;
+  if (url) shell.openExternal(url).catch(() => {});
+}
+
+async function answerOnboarding(step, yes) {
+  const ob = { ...(settings.get('onboarding') || {}) };
+  if (step === 'login') {
+    ob.loginAsked = true;
+    settings.set('onboarding', ob);
+    if (yes) setLoginItem(true);
+  } else if (step === 'hooks') {
+    ob.hooksAsked = true;
+    settings.set('onboarding', ob);
+    if (yes) {
+      // The in-widget card already explained what happens, so no extra confirmation dialog.
+      try {
+        const r = hooks.install({ hookSource: HOOK_SOURCE });
+        hookStatus = hooks.status();
+        sendToRenderer('toast', r.nodeFound
+          ? 'Hooks installed. New Claude Code sessions will show up here.'
+          : 'Hooks installed, but Node.js wasn’t found. Install Node.js for them to work.');
+      } catch (err) {
+        sendToRenderer('toast', `Couldn’t install hooks: ${err.message}`);
+      }
+    }
+  }
+  settings.flush();
+  sendUiState();
 }
 
 function updateSetting(key, value) {
   if (!settings.setUser(key, value)) return false;
   if (key === 'theme') { previewTheme = null; applyTheme(); }
   if (key === 'alwaysOnTop') applyAlwaysOnTop();
-  if (key === 'openAtLogin') applyLoginItem();
   sendUiState();
   return true;
 }
@@ -377,11 +431,16 @@ function registerIpc() {
   ipcMain.on('dismiss', (_e, id) => store.dismiss(String(id)));
   ipcMain.handle('set-setting', (_e, key, value) => updateSetting(String(key), value));
   ipcMain.handle('open', (_e, id) => openSession(id));
+  ipcMain.handle('set-login-item', (_e, on) => setLoginItem(on));
+  ipcMain.on('refresh-ui-state', () => sendUiState()); // e.g. Settings opened: re-read the real login-item state
+  ipcMain.on('open-login-items', () => openLoginItemsSettings());
+  ipcMain.on('onboarding-answer', (_e, step, yes) => answerOnboarding(String(step), Boolean(yes)));
 }
 
 // ---------- startup ----------
 
-app.on('second-instance', () => showWindow({ expand: true }));
+// Only one copy runs: a second launch just brings the widget forward (unless it's a login start).
+app.on('second-instance', (_e, argv) => { if (!argv.includes(LOGIN_ARG)) showWindow({ expand: true }); });
 app.on('before-quit', () => { quitting = true; settings && settings.flush(); });
 app.on('window-all-closed', (e) => e.preventDefault?.());
 app.on('activate', () => showWindow());
@@ -389,6 +448,7 @@ app.on('activate', () => showWindow());
 app.whenReady().then(async () => {
   if (IS_MAC && app.dock) app.dock.hide();
   settings = new Settings(app.getPath('userData'));
+  openedAtLogin = loginItem.wasOpenedAtLogin();
   settings.writeHookConfig();
   nativeTheme.themeSource = settings.get('theme');
   nativeTheme.on('updated', () => applyTheme()); // live-follow OS appearance when theme = system
@@ -404,7 +464,7 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
   hookStatus = hooks.status();
-  applyLoginItem();
+  loginItem.repairStalePath(); // Windows: keep the Run entry pointing at the current exe
 
   try {
     await startServer({

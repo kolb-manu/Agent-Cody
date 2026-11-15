@@ -13,10 +13,12 @@ const DEFAULTS = {
   notify: { attention: true, stopped: true, finished: false },
   sound: true,
   alwaysOnTop: true,
-  openAtLogin: true,
+  // "Start when I log in" is deliberately NOT stored here: the OS is the source of truth (login-item.js).
+  onboarding: { loginAsked: false, hooksAsked: false },
   staleMinutes: 10,
   fadeSeconds: 8,
   collapsed: false,
+  hidden: false,            // window hidden to the tray (restored as-is when started at login)
   bounds: null,             // {x, y, width, height} of the expanded window
 };
 
@@ -25,7 +27,6 @@ const USER_SETTINGS = {
   theme: (v) => ['light', 'dark', 'system'].includes(v),
   sound: (v) => typeof v === 'boolean',
   alwaysOnTop: (v) => typeof v === 'boolean',
-  openAtLogin: (v) => typeof v === 'boolean',
   'notify.attention': (v) => typeof v === 'boolean',
   'notify.stopped': (v) => typeof v === 'boolean',
   'notify.finished': (v) => typeof v === 'boolean',
@@ -36,6 +37,8 @@ const AGENT_CODY_DIR = path.join(os.homedir(), '.agent-cody');
 /**
  * Migrate settings written by earlier versions:
  *   v0.1: { muted: bool, notifyOn: { permission, question, done, error, stopped, stale } }
+ *   v0.2: { openAtLogin: bool }  (now read from the OS instead; the old default was "on"
+ *         without asking, so it's dropped and the user gets the first-run question)
  * Old notifyOn values were never editable in the UI, so only explicit opt-outs carry over;
  * "finished" follows the new default (off).
  */
@@ -52,17 +55,22 @@ function migrate(loaded) {
   }
   delete out.muted;
   delete out.notifyOn;
+  delete out.openAtLogin;
   return out;
 }
 
 class Settings {
   constructor(dir) {
     this.file = path.join(dir, 'settings.json');
-    this.data = { ...DEFAULTS, notify: { ...DEFAULTS.notify } };
+    this.data = { ...DEFAULTS, notify: { ...DEFAULTS.notify }, onboarding: { ...DEFAULTS.onboarding } };
     this.firstRun = true;
     try {
       const loaded = migrate(JSON.parse(fs.readFileSync(this.file, 'utf8')));
-      this.data = { ...DEFAULTS, ...loaded, notify: { ...DEFAULTS.notify, ...(loaded.notify || {}) } };
+      this.data = {
+        ...DEFAULTS, ...loaded,
+        notify: { ...DEFAULTS.notify, ...(loaded.notify || {}) },
+        onboarding: { ...DEFAULTS.onboarding, ...(loaded.onboarding || {}) },
+      };
       this.firstRun = false;
     } catch (_) { /* first run or unreadable: defaults */ }
     const envPort = parseInt(process.env.AGENT_CODY_PORT || '', 10);
