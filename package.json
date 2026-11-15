@@ -1,0 +1,63 @@
+{
+  "name": "agent-cody",
+  "productName": "Agent Cody",
+  "version": "0.1.0",
+  "description": "Desktop widget showing live progress of every Claude Code session on this machine.",
+  "main": "src/main/main.js",
+  "private": true,
+  "license": "MIT",
+  "author": "Agent Cody",
+  "scripts": {
+    "start": "electron .",
+    "simulate": "node scripts/simulate.js",
+    "simulate:hook": "node scripts/simulate.js --via-hook",
+    "hooks:install": "node scripts/hooks-cli.js install",
+    "hooks:uninstall": "node scripts/hooks-cli.js uninstall",
+    "hooks:status": "node scripts/hooks-cli.js status",
+    "icons": "node scripts/make-icons.js",
+    "test": "node --test test/*.test.js",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "pack": "electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.agentcody.widget",
+    "productName": "Agent Cody",
+    "files": [
+      "src/**/*",
+      "hook/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.png",
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0"
+  }
+}
