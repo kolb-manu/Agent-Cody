@@ -1,6 +1,7 @@
 'use strict';
+const fs = require('fs');
 const path = require('path');
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, dialog, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme, screen, dialog, shell } = require('electron');
 const { SessionStore } = require('./sessions');
 const { startServer } = require('./server');
 const { Settings } = require('./settings');
@@ -11,9 +12,10 @@ const hooks = require('./hooks-installer');
 
 const IS_MAC = process.platform === 'darwin';
 const IS_WIN = process.platform === 'win32';
-const PILL = { width: 176, height: 40 };
-const MIN_EXPANDED = { width: 300, height: 150 };
-const DEFAULT_EXPANDED = { width: 360, height: 340 };
+const PILL = { width: 248, height: 40 };
+const MIN_EXPANDED = { width: 300, height: 120 };
+const DEFAULT_EXPANDED = { width: 340, height: 300 };
+const BG = { light: '#FFFFFF', dark: '#1F1E1D' };
 const HOOK_SOURCE = path.join(__dirname, '..', '..', 'hook', 'agent-cody-hook.js');
 
 // Dev/testing: isolate profile (settings + window state) from your real one.
@@ -27,7 +29,21 @@ let quitting = false;
 let settings, store, notifier;
 let serverError = null;
 let hookStatus = 'not-installed';
+let previewTheme = null; // transient theme override from the simulator showcase
 const icons = {};
+
+// ---------- theme ----------
+
+function resolvedTheme() {
+  if (previewTheme) return previewTheme;
+  return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+}
+
+function applyTheme() {
+  nativeTheme.themeSource = settings.get('theme'); // also themes native menus and dialogs
+  if (win && !win.isDestroyed()) win.setBackgroundColor(BG[resolvedTheme()]);
+  sendUiState();
+}
 
 // ---------- window ----------
 
@@ -64,6 +80,21 @@ function anchoredBounds(from, size) {
   return clampToScreen({ x: rightSide ? from.x + from.width - size.width : from.x, y: from.y, ...size });
 }
 
+/** Given the pill bounds, compute expanded bounds that anchor the same way. */
+function anchoredBoundsInverse(pill, prevExpanded) {
+  const wa = workAreaFor(pill);
+  const rightSide = pill.x + pill.width / 2 > wa.x + wa.width / 2;
+  const { width, height } = prevExpanded;
+  return { width, height, x: rightSide ? pill.x + pill.width - width : pill.x, y: pill.y };
+}
+
+function applyAlwaysOnTop() {
+  if (!win) return;
+  const on = settings.get('alwaysOnTop') !== false;
+  win.setAlwaysOnTop(on, 'floating');
+  if (IS_MAC) win.setVisibleOnAllWorkspaces(on, { visibleOnFullScreen: on });
+}
+
 function createWindow() {
   const collapsed = Boolean(settings.get('collapsed'));
   const exp = expandedBounds();
@@ -74,13 +105,12 @@ function createWindow() {
     minHeight: collapsed ? PILL.height : MIN_EXPANDED.height,
     frame: false,
     resizable: !collapsed,
-    alwaysOnTop: true,
     skipTaskbar: true,
     show: false,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
-    backgroundColor: '#14151b',
+    backgroundColor: BG[resolvedTheme()],
     title: 'Agent Cody',
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js'),
@@ -89,17 +119,21 @@ function createWindow() {
       sandbox: true,
     },
   });
-  win.setAlwaysOnTop(true, 'floating');
-  if (IS_MAC) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  applyAlwaysOnTop();
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   win.once('ready-to-show', () => win.showInactive());
-  // Dev/testing: AGENT_CODY_SCREENSHOT=<file.png>[,<delayMs>] writes a capture of the widget.
+  // Dev/testing: AGENT_CODY_SCREENSHOT='[{"file":"a.png","at":3000,"js":"optional UI action"}]'
+  // writes captures of the widget (used to check the UI without clicking).
   if (process.env.AGENT_CODY_SCREENSHOT) {
-    const [file, delay] = process.env.AGENT_CODY_SCREENSHOT.split(',');
-    setTimeout(async () => {
-      const img = await win.webContents.capturePage();
-      require('fs').writeFileSync(file, img.toPNG());
-    }, parseInt(delay || '3000', 10));
+    let shots = [];
+    try { shots = JSON.parse(process.env.AGENT_CODY_SCREENSHOT); } catch (_) { shots = [{ file: process.env.AGENT_CODY_SCREENSHOT, at: 3000 }]; }
+    for (const shot of shots) {
+      setTimeout(async () => {
+        if (shot.js) { await win.webContents.executeJavaScript(shot.js).catch(() => {}); await new Promise((r) => setTimeout(r, 400)); }
+        const img = await win.webContents.capturePage();
+        fs.writeFileSync(shot.file, img.toPNG());
+      }, shot.at || 3000);
+    }
   }
 
   let saveTimer = null;
@@ -108,13 +142,8 @@ function createWindow() {
     saveTimer = setTimeout(() => {
       if (!win || win.isDestroyed()) return;
       const b = win.getBounds();
-      if (settings.get('collapsed')) {
-        // Moving the pill moves where the expanded window will reappear.
-        const prev = expandedBounds();
-        settings.set('bounds', anchoredBoundsInverse(b, prev));
-      } else {
-        settings.set('bounds', b);
-      }
+      if (settings.get('collapsed')) settings.set('bounds', anchoredBoundsInverse(b, expandedBounds()));
+      else settings.set('bounds', b);
     }, 400);
   };
   win.on('move', saveBounds);
@@ -124,18 +153,9 @@ function createWindow() {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
 }
 
-/** Given the pill bounds, compute expanded bounds that anchor the same way. */
-function anchoredBoundsInverse(pill, prevExpanded) {
-  const wa = workAreaFor(pill);
-  const rightSide = pill.x + pill.width / 2 > wa.x + wa.width / 2;
-  const { width, height } = prevExpanded;
-  return { width, height, x: rightSide ? pill.x + pill.width - width : pill.x, y: pill.y };
-}
-
 function setCollapsed(collapsed) {
   if (!win) return;
-  const wasCollapsed = Boolean(settings.get('collapsed'));
-  if (collapsed === wasCollapsed) return;
+  if (collapsed === Boolean(settings.get('collapsed'))) return;
   if (collapsed) {
     settings.set('bounds', win.getBounds());
     settings.set('collapsed', true);
@@ -177,17 +197,51 @@ function scheduleSessionsSend() {
   }, 60);
 }
 
+function loginItemSupported() { return app.isPackaged && (IS_MAC || IS_WIN); }
+
 function sendUiState() {
   if (!win || win.isDestroyed()) return;
   win.webContents.send('ui-state', {
     collapsed: Boolean(settings.get('collapsed')),
-    muted: Boolean(settings.get('muted')),
+    theme: settings.get('theme'),
+    resolvedTheme: resolvedTheme(),
+    sound: settings.get('sound') !== false,
+    notify: settings.get('notify'),
+    alwaysOnTop: settings.get('alwaysOnTop') !== false,
+    openAtLogin: settings.get('openAtLogin') !== false,
+    loginItemSupported: loginItemSupported(),
     hookStatus,
     port: settings.get('port'),
     serverError,
     platform: process.platform,
   });
   updateTrayMenu();
+}
+
+const sendToRenderer = (channel, payload) => { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); };
+
+// ---------- open (focus a session's window) ----------
+
+async function openSession(id, { fromNotification = false } = {}) {
+  const s = store.getRaw(String(id));
+  if (!s) return { ok: false, method: 'none', message: 'That session is gone.' };
+  store.acknowledge(s.id);
+  let r = await focusSession({ name: s.name, cwd: s.cwd, termBundleId: s.termBundleId, termProgram: s.termProgram, pid: s.pid });
+  if (!r.ok) {
+    // Fallback: bring the project folder to the front.
+    const reason = r.message || 'Couldn’t find the session’s window.';
+    const err = s.cwd && fs.existsSync(s.cwd) ? await shell.openPath(s.cwd) : 'missing';
+    r = err === ''
+      ? { ok: true, method: 'folder', message: `${reason} Opened the project folder instead.` }
+      : { ok: false, method: 'none', message: `${reason}${s.cwd ? ` It runs in ${s.cwd}.` : ''}` };
+  }
+  if (fromNotification) {
+    // If we couldn't reach the exact window, show the widget so the hint is visible.
+    if (r.method !== 'window') showWindow({ focus: r.method === 'none', expand: true });
+    sendToRenderer('reveal', s.id);
+    if (r.message) sendToRenderer('toast', r.message);
+  }
+  return r;
 }
 
 // ---------- tray ----------
@@ -204,8 +258,8 @@ function buildIcons() {
     icons.normal.setTemplateImage(true);
     icons.attention = icons.normal;
   } else {
-    icons.normal = img({ mode: 'color', color: '#8B7CF6' });
-    icons.attention = img({ mode: 'color', color: '#8B7CF6', badge: '#F5A524' });
+    icons.normal = img({ mode: 'color', color: '#D97757' });
+    icons.attention = img({ mode: 'color', color: '#D97757', badge: '#FAF9F5' });
   }
 }
 
@@ -220,17 +274,18 @@ function updateTray(list) {
   if (!tray) return;
   const active = list.filter((s) => s.state !== 'ended');
   const attention = active.filter((s) => s.state === 'attention').length;
-  tray.setToolTip(`Agent Cody: ${active.length} session${active.length === 1 ? '' : 's'}${attention ? `, ${attention} need${attention === 1 ? 's' : ''} you` : ''}`);
+  tray.setToolTip(`Agent Cody: ${active.length} agent${active.length === 1 ? '' : 's'}${attention ? `, ${attention} need${attention === 1 ? 's' : ''} you` : ''}`);
   tray.setImage(attention ? icons.attention : icons.normal);
   if (IS_MAC) tray.setTitle(attention ? String(attention) : '');
 }
 
 function menuTemplate() {
   return [
-    { label: win && win.isVisible() ? 'Hide Agent Cody' : 'Show Agent Cody', click: () => (win.isVisible() ? win.hide() : showWindow()), },
-    { label: settings.get('collapsed') ? 'Expand' : 'Collapse to pill', click: () => setCollapsed(!settings.get('collapsed')) },
+    { label: win && win.isVisible() ? 'Hide Agent Cody' : 'Show Agent Cody', click: () => (win.isVisible() ? win.hide() : showWindow()) },
+    { label: settings.get('collapsed') ? 'Expand' : 'Minimise to pill', click: () => setCollapsed(!settings.get('collapsed')) },
+    { label: 'Settings…', click: () => { showWindow({ expand: true }); sendToRenderer('show-settings'); } },
     { type: 'separator' },
-    { label: 'Mute sounds', type: 'checkbox', checked: Boolean(settings.get('muted')), click: () => toggleMute() },
+    { label: 'Play a sound', type: 'checkbox', checked: settings.get('sound') !== false, click: () => updateSetting('sound', !(settings.get('sound') !== false)) },
     { type: 'separator' },
     { label: hookStatus === 'installed' ? 'Reinstall Claude Code hooks…' : 'Install Claude Code hooks…', click: () => installHooks() },
     { label: 'Uninstall Claude Code hooks…', enabled: hookStatus !== 'not-installed', click: () => uninstallHooks() },
@@ -244,9 +299,22 @@ function updateTrayMenu() {
   if (tray) tray.setContextMenu(Menu.buildFromTemplate(menuTemplate()));
 }
 
-function toggleMute() {
-  settings.set('muted', !settings.get('muted'));
+// ---------- settings ----------
+
+function applyLoginItem() {
+  if (!loginItemSupported()) return; // never register the dev Electron binary as a login item
+  try {
+    app.setLoginItemSettings({ openAtLogin: settings.get('openAtLogin') !== false });
+  } catch (err) { console.error('[agent-cody] login item:', err.message); }
+}
+
+function updateSetting(key, value) {
+  if (!settings.setUser(key, value)) return false;
+  if (key === 'theme') { previewTheme = null; applyTheme(); }
+  if (key === 'alwaysOnTop') applyAlwaysOnTop();
+  if (key === 'openAtLogin') applyLoginItem();
   sendUiState();
+  return true;
 }
 
 // ---------- hooks install ----------
@@ -304,17 +372,11 @@ function refreshHookStatus() {
 function registerIpc() {
   ipcMain.on('ui-ready', () => { sendUiState(); scheduleSessionsSend(); });
   ipcMain.on('toggle-collapse', () => setCollapsed(!settings.get('collapsed')));
-  ipcMain.on('toggle-mute', () => toggleMute());
-  ipcMain.on('hide', () => { win.hide(); updateTrayMenu(); });
-  ipcMain.on('menu', () => Menu.buildFromTemplate(menuTemplate()).popup({ window: win }));
   ipcMain.on('install-hooks', () => installHooks());
+  ipcMain.on('uninstall-hooks', () => uninstallHooks());
   ipcMain.on('dismiss', (_e, id) => store.dismiss(String(id)));
-  ipcMain.handle('activate', async (_e, id) => {
-    const s = store.getRaw(String(id));
-    if (!s) return { ok: false, reason: 'Session not found' };
-    store.acknowledge(s.id);
-    return focusSession({ termBundleId: s.termBundleId, termProgram: s.termProgram, pid: s.pid });
-  });
+  ipcMain.handle('set-setting', (_e, key, value) => updateSetting(String(key), value));
+  ipcMain.handle('open', (_e, id) => openSession(id));
 }
 
 // ---------- startup ----------
@@ -328,11 +390,13 @@ app.whenReady().then(async () => {
   if (IS_MAC && app.dock) app.dock.hide();
   settings = new Settings(app.getPath('userData'));
   settings.writeHookConfig();
+  nativeTheme.themeSource = settings.get('theme');
+  nativeTheme.on('updated', () => applyTheme()); // live-follow OS appearance when theme = system
   store = new SessionStore({
     staleMs: settings.get('staleMinutes') * 60 * 1000,
     fadeMs: settings.get('fadeSeconds') * 1000,
   });
-  notifier = new Notifier({ settings, onClick: (id) => { showWindow({ expand: true }); if (win) win.webContents.send('reveal', id); } });
+  notifier = new Notifier({ settings, onClick: (id) => openSession(id, { fromNotification: true }) });
   store.on('change', scheduleSessionsSend);
 
   buildIcons();
@@ -340,11 +404,18 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
   hookStatus = hooks.status();
+  applyLoginItem();
 
   try {
     await startServer({
       port: settings.get('port'),
       onEvent: (evt) => { for (const n of store.handle(evt)) notifier.notify(n); },
+      onControl: (msg) => {
+        if (msg && 'preview_theme' in msg) {
+          previewTheme = msg.preview_theme === 'light' || msg.preview_theme === 'dark' ? msg.preview_theme : null;
+          applyTheme();
+        }
+      },
     });
   } catch (err) {
     serverError = err.code === 'EADDRINUSE'

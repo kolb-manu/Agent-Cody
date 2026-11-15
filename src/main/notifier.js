@@ -5,6 +5,13 @@
  */
 const { Notification } = require('electron');
 
+/** Store notification kinds → the three user-facing settings categories. */
+const CATEGORY = {
+  permission: 'attention', question: 'attention',
+  done: 'finished',
+  error: 'stopped', stopped: 'stopped', stale: 'stopped',
+};
+
 class Notifier {
   constructor({ settings, onClick }) {
     this.settings = settings;
@@ -15,8 +22,8 @@ class Notifier {
 
   notify(n) {
     if (!Notification.isSupported()) return;
-    const notifyOn = this.settings.get('notifyOn') || {};
-    if (notifyOn[n.kind] === false) return;
+    const category = CATEGORY[n.kind] || 'stopped';
+    if (this.settings.get(`notify.${category}`) === false) return;
     const key = `${n.sessionId}:${n.kind}`;
     const now = Date.now();
     if (now - (this.lastSent.get(key) || 0) < 4000) return;
@@ -25,8 +32,8 @@ class Notifier {
     const notif = new Notification({
       title: n.title,
       body: n.body || '',
-      silent: Boolean(this.settings.get('muted')),
-      urgency: n.kind === 'permission' || n.kind === 'question' ? 'critical' : 'normal',
+      silent: this.settings.get('sound') === false,
+      urgency: category === 'attention' ? 'critical' : 'normal',
     });
     this.live.add(notif);
     const drop = () => this.live.delete(notif);
@@ -39,4 +46,4 @@ class Notifier {
   }
 }
 
-module.exports = { Notifier };
+module.exports = { Notifier, CATEGORY };

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;">
@@ -9,29 +9,81 @@
 <body>
   <div id="expanded">
     <header class="titlebar">
-      <div class="brand"><span class="brand-mark" id="brand-mark"></span><span>Agent Cody</span><span class="count" id="count"></span></div>
+      <div class="brand">
+        <span class="spark" id="spark"></span>
+        <span class="title">Agent Cody</span>
+        <span class="count" id="count"></span>
+      </div>
       <div class="actions">
-        <button id="btn-mute" class="icon-btn" title="Mute notification sounds" aria-label="Mute notification sounds"></button>
-        <button id="btn-menu" class="icon-btn" title="Menu" aria-label="Menu"></button>
-        <button id="btn-collapse" class="icon-btn" title="Collapse to pill" aria-label="Collapse to pill"></button>
-        <button id="btn-hide" class="icon-btn" title="Hide (tray icon brings it back)" aria-label="Hide"></button>
+        <button id="btn-theme" class="icon-btn" aria-label="Switch theme"></button>
+        <button id="btn-settings" class="icon-btn" title="Settings" aria-label="Settings"></button>
+        <button id="btn-min" class="icon-btn" title="Minimise" aria-label="Minimise to pill"></button>
       </div>
     </header>
+
     <div id="banner" class="banner" hidden></div>
+
     <main id="list" aria-live="polite"></main>
+
     <div id="empty" class="empty" hidden>
-      <div class="empty-mark" id="empty-mark"></div>
       <p id="empty-text"></p>
-      <button id="btn-install" class="primary" hidden>Install Claude Code hooks</button>
+      <button id="btn-install" class="btn primary" hidden>Install Claude Code hooks</button>
     </div>
+
+    <section id="settings" class="settings" hidden aria-label="Settings">
+      <div class="settings-head">
+        <button id="btn-back" class="icon-btn" title="Back" aria-label="Back to agents"></button>
+        <h2>Settings</h2>
+      </div>
+
+      <div class="group">
+        <div class="label" id="theme-label">Theme</div>
+        <div class="segmented" role="radiogroup" aria-labelledby="theme-label">
+          <button role="radio" data-theme-choice="light">Light</button>
+          <button role="radio" data-theme-choice="dark">Dark</button>
+          <button role="radio" data-theme-choice="system">System</button>
+        </div>
+        <p class="note">System follows your macOS or Windows appearance.</p>
+      </div>
+
+      <div class="group">
+        <div class="label">Notify me when an agent</div>
+        <label class="switch-row"><span>Needs permission or asks a question</span><input type="checkbox" role="switch" data-setting="notify.attention"></label>
+        <label class="switch-row"><span>Stops or errors</span><input type="checkbox" role="switch" data-setting="notify.stopped"></label>
+        <label class="switch-row"><span>Finishes</span><input type="checkbox" role="switch" data-setting="notify.finished"></label>
+        <label class="switch-row"><span>Play a sound</span><input type="checkbox" role="switch" data-setting="sound"></label>
+      </div>
+
+      <div class="group">
+        <div class="label">Window</div>
+        <label class="switch-row"><span>Keep on top of other windows</span><input type="checkbox" role="switch" data-setting="alwaysOnTop"></label>
+        <label class="switch-row"><span>Start when I log in</span><input type="checkbox" role="switch" data-setting="openAtLogin"></label>
+        <p class="note" id="login-note" hidden>Takes effect in the installed app (not when running from source).</p>
+      </div>
+
+      <div class="group">
+        <div class="label">Claude Code hooks</div>
+        <div class="hook-row">
+          <span id="hook-status" class="hook-status"></span>
+          <span class="spacer"></span>
+          <button id="btn-hooks-install" class="btn"></button>
+          <button id="btn-hooks-uninstall" class="btn subtle">Uninstall</button>
+        </div>
+        <p class="note">Local only · listening on 127.0.0.1:<span id="port"></span></p>
+      </div>
+    </section>
+
     <div id="toast" class="toast" role="status"></div>
   </div>
 
   <div id="pill" hidden>
     <span class="grip" title="Drag"></span>
-    <button id="pill-btn" title="Expand">
-      <span class="dot" id="pill-dot"></span><span id="pill-text">0 agents</span>
+    <button id="pill-main" title="Expand">
+      <span class="pill-dot" id="pill-dot"></span>
+      <span class="pill-text" id="pill-text"></span>
+      <span class="minibars" id="minibars"></span>
     </button>
+    <button id="pill-open" class="pill-open" hidden>Open</button>
   </div>
 
   <script src="renderer.js"></script>

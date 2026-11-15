@@ -6,6 +6,8 @@
  *   node scripts/simulate.js            # normal speed
  *   node scripts/simulate.js --fast     # 3x faster
  *   node scripts/simulate.js --via-hook # pipe every event through hook/agent-cody-hook.js (end-to-end)
+ *   node scripts/simulate.js --showcase # all states at once, alternating light/dark preview
+ *        [--cycles=2] [--hold=5000]      # (preview doesn't change your saved theme)
  *   AGENT_CODY_PORT=5000 node scripts/simulate.js
  *
  * Covers: TodoWrite progress, Task tools progress, a permission request (approved
@@ -157,4 +159,68 @@ async function main() {
   console.log('Done. Rows that finished stay visible; the ended session fades out.');
 }
 
-main();
+// ---------- showcase: every state at once, both themes ----------
+function control(body) {
+  return new Promise((resolve) => {
+    const data = JSON.stringify(body);
+    const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/control', timeout: 800,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), 'X-Agent-Cody': '1' } },
+    (res) => { res.resume(); resolve(res.statusCode === 200); });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.end(data);
+  });
+}
+
+async function showcase() {
+  const cycles = parseInt((process.argv.find((a) => a.startsWith('--cycles=')) || '--cycles=2').split('=')[1], 10);
+  const holdMs = parseInt((process.argv.find((a) => a.startsWith('--hold=')) || '--hold=5000').split('=')[1], 10);
+  const P = {
+    working: { id: `show-work-${run}`, cwd: `${home}${sep}payments-api` },
+    nosteps: { id: `show-nosteps-${run}`, cwd: `${home}${sep}marketing-site` },
+    permission: { id: `show-perm-${run}`, cwd: `${home}${sep}infra-cli` },
+    question: { id: `show-q-${run}`, cwd: `${home}${sep}handbook` },
+    finished: { id: `show-done-${run}`, cwd: `${home}${sep}data-pipeline` },
+    stopped: { id: `show-stop-${run}`, cwd: `${home}${sep}mobile-app` },
+  };
+  const send = (e) => post(e, port, 800);
+  const now = Date.now();
+  const events = [
+    ev(P.working, 'UserPromptSubmit', { prompt: 'Make the charge endpoint idempotent' }),
+    tool(P.working, 'PreToolUse', 'TodoWrite', { todos: todos(apiPlan, 3) }),
+    tool(P.working, 'PreToolUse', 'Edit', { file_path: '/test/charge.test.ts' }),
+
+    ev(P.nosteps, 'UserPromptSubmit', { prompt: 'Why is the hero image blurry on retina screens?' }),
+    tool(P.nosteps, 'PreToolUse', 'Grep', { pattern: 'srcset' }),
+
+    ev(P.permission, 'UserPromptSubmit', { prompt: 'Remove the old feature flags' }),
+    tool(P.permission, 'PreToolUse', 'TodoWrite', { todos: todos(['Find flags', 'Delete flag files', 'Update deploy script'], 1) }),
+    tool(P.permission, 'PermissionRequest', 'Bash', { command: 'rm -rf ./legacy-flags', description: 'Remove legacy flag files' }),
+
+    ev(P.question, 'UserPromptSubmit', { prompt: 'Rewrite the onboarding guide' }),
+    tool(P.question, 'PreToolUse', 'AskUserQuestion', { questions: [{ question: 'Should the guide cover Windows setup too?' }] }),
+
+    // finished 4m 12s after its prompt (backdated via the hook timestamp)
+    ev(P.finished, 'UserPromptSubmit', { prompt: 'Backfill last week of events', ts: now - 252_000 }),
+    tool(P.finished, 'PreToolUse', 'TodoWrite', { todos: todos(['Query gaps', 'Backfill', 'Verify counts'], 3) }),
+    ev(P.finished, 'Stop', { last_assistant_message: 'Backfilled 1.2M events; counts match the warehouse.', background_tasks: [], session_crons: [] }),
+
+    ev(P.stopped, 'UserPromptSubmit', { prompt: 'Upgrade React Native to the latest version' }),
+    tool(P.stopped, 'PreToolUse', 'Bash', { command: 'npx react-native upgrade', description: 'Run the upgrade helper' }),
+    ev(P.stopped, 'StopFailure', { error: 'overloaded', error_details: '529 Overloaded', last_assistant_message: 'API Error: Overloaded' }),
+  ];
+  console.log(`Agent Cody showcase → http://127.0.0.1:${port}`);
+  for (const e of events) { if (!(await send(e))) { console.error('Agent Cody is not running (start it with `npm start`).'); process.exit(1); } }
+  console.log('6 agents: working (3/5), working without a list, needs permission, asks a question, finished, stopped.');
+  for (let i = 0; i < cycles; i++) {
+    for (const theme of ['light', 'dark']) {
+      await control({ preview_theme: theme });
+      console.log(`  previewing ${theme} theme`);
+      await new Promise((r) => setTimeout(r, holdMs));
+    }
+  }
+  await control({ preview_theme: null });
+  console.log('Back to your saved theme. The agents stay; dismiss them or restart the app to clear.');
+}
+
+if (process.argv.includes('--showcase')) showcase(); else main();

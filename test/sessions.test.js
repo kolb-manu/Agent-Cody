@@ -179,3 +179,41 @@ test('describeTool and normalizeTaskId', () => {
   assert.equal(normalizeTaskId('task-007'), '7');
   assert.equal(normalizeTaskId('#3'), '3');
 });
+
+test('finished turns record their duration; hook timestamp backdates the start', () => {
+  const { store, ev, advance } = mk();
+  ev('a', 'UserPromptSubmit', { prompt: 'x' });
+  advance(252_000);
+  ev('a', 'Stop', {});
+  assert.equal(get(store, 'a').turnMs, 252_000);
+  ev('b', 'UserPromptSubmit', { prompt: 'x', ts: store.now() - 60_000 });
+  ev('b', 'Stop', {});
+  assert.equal(get(store, 'b').turnMs, 60_000);
+  ev('c', 'UserPromptSubmit', { prompt: 'x', ts: store.now() + 10 * 60_000 });
+  ev('c', 'Stop', {});
+  assert.equal(get(store, 'c').turnMs, 0, 'future timestamps are ignored');
+});
+
+test('interrupt mid-tool becomes "stopped" with a reason; a new prompt clears it', () => {
+  const { store, ev } = mk();
+  ev('a', 'UserPromptSubmit', { prompt: 'x' });
+  const n = ev('a', 'PostToolUseFailure', { tool_name: 'Bash', is_interrupt: true, error: 'interrupted' });
+  assert.equal(n[0].kind, 'stopped');
+  assert.equal(get(store, 'a').state, 'stopped');
+  assert.equal(get(store, 'a').stopReason, 'interrupted');
+  ev('a', 'UserPromptSubmit', { prompt: 'again' });
+  assert.equal(get(store, 'a').stopReason, null);
+});
+
+test('errors, staleness and abnormal ends carry a stop reason', () => {
+  const { store, ev, advance } = mk();
+  ev('e', 'StopFailure', { error: 'overloaded' });
+  assert.equal(get(store, 'e').stopReason, 'error');
+  ev('s', 'UserPromptSubmit', { prompt: 'x' });
+  ev('x', 'UserPromptSubmit', { prompt: 'x' });
+  ev('x', 'SessionEnd', { reason: 'other' });
+  assert.equal(get(store, 'x').stopReason, 'ended');
+  advance(61_000);
+  store.tick();
+  assert.equal(get(store, 's').stopReason, 'no updates');
+});

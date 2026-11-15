@@ -9,23 +9,61 @@ const path = require('path');
 
 const DEFAULTS = {
   port: 47821,
-  muted: false,
+  theme: 'system',          // 'light' | 'dark' | 'system'
+  notify: { attention: true, stopped: true, finished: false },
+  sound: true,
+  alwaysOnTop: true,
+  openAtLogin: true,
   staleMinutes: 10,
   fadeSeconds: 8,
   collapsed: false,
-  bounds: null, // {x, y, width, height} of the expanded window
-  notifyOn: { permission: true, question: true, done: true, error: true, stopped: true, stale: true },
+  bounds: null,             // {x, y, width, height} of the expanded window
+};
+
+/** Keys the UI may change, with validators. */
+const USER_SETTINGS = {
+  theme: (v) => ['light', 'dark', 'system'].includes(v),
+  sound: (v) => typeof v === 'boolean',
+  alwaysOnTop: (v) => typeof v === 'boolean',
+  openAtLogin: (v) => typeof v === 'boolean',
+  'notify.attention': (v) => typeof v === 'boolean',
+  'notify.stopped': (v) => typeof v === 'boolean',
+  'notify.finished': (v) => typeof v === 'boolean',
 };
 
 const AGENT_CODY_DIR = path.join(os.homedir(), '.agent-cody');
 
+/**
+ * Migrate settings written by earlier versions:
+ *   v0.1: { muted: bool, notifyOn: { permission, question, done, error, stopped, stale } }
+ * Old notifyOn values were never editable in the UI, so only explicit opt-outs carry over;
+ * "finished" follows the new default (off).
+ */
+function migrate(loaded) {
+  const out = { ...loaded };
+  if (typeof out.muted === 'boolean' && out.sound === undefined) out.sound = !out.muted;
+  if (out.notifyOn && !out.notify) {
+    const n = out.notifyOn;
+    out.notify = {
+      attention: !(n.permission === false && n.question === false),
+      stopped: !(n.error === false && n.stopped === false),
+      finished: false,
+    };
+  }
+  delete out.muted;
+  delete out.notifyOn;
+  return out;
+}
+
 class Settings {
   constructor(dir) {
     this.file = path.join(dir, 'settings.json');
-    this.data = { ...DEFAULTS };
+    this.data = { ...DEFAULTS, notify: { ...DEFAULTS.notify } };
+    this.firstRun = true;
     try {
-      const loaded = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      this.data = { ...DEFAULTS, ...loaded, notifyOn: { ...DEFAULTS.notifyOn, ...(loaded.notifyOn || {}) } };
+      const loaded = migrate(JSON.parse(fs.readFileSync(this.file, 'utf8')));
+      this.data = { ...DEFAULTS, ...loaded, notify: { ...DEFAULTS.notify, ...(loaded.notify || {}) } };
+      this.firstRun = false;
     } catch (_) { /* first run or unreadable: defaults */ }
     const envPort = parseInt(process.env.AGENT_CODY_PORT || '', 10);
     this.portFromEnv = envPort > 0;
@@ -33,12 +71,27 @@ class Settings {
     this._timer = null;
   }
 
-  get(k) { return this.data[k]; }
+  get(k) {
+    if (k.includes('.')) { const [a, b] = k.split('.'); return (this.data[a] || {})[b]; }
+    return this.data[k];
+  }
 
   set(k, v) {
-    this.data[k] = v;
+    if (k.includes('.')) {
+      const [a, b] = k.split('.');
+      this.data[a] = { ...(this.data[a] || {}), [b]: v };
+    } else {
+      this.data[k] = v;
+    }
     clearTimeout(this._timer);
     this._timer = setTimeout(() => this.flush(), 300);
+  }
+
+  /** Validated update from the UI. Returns true if applied. */
+  setUser(k, v) {
+    if (!USER_SETTINGS[k] || !USER_SETTINGS[k](v)) return false;
+    this.set(k, v);
+    return true;
   }
 
   flush() {
@@ -71,4 +124,4 @@ class Settings {
   }
 }
 
-module.exports = { Settings, DEFAULTS, AGENT_CODY_DIR };
+module.exports = { Settings, DEFAULTS, AGENT_CODY_DIR, migrate };

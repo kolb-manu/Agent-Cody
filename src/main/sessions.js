@@ -9,6 +9,7 @@
  *   attention needs permission / asked a question / waiting for input
  *   done      finished its turn (Stop)
  *   error     turn ended with an API error (StopFailure)
+ *   stopped   turn was interrupted by the user mid-tool
  *   stale     was working but stopped reporting for a long time
  *   ended     session ended (SessionEnd or the Claude process exited); fades out
  */
@@ -123,6 +124,8 @@ class SessionStore extends EventEmitter {
       id: s.id, name: s.name, cwd: s.cwd, title: s.title, state: s.state,
       activity: s.activity, detail: s.detail, attention: s.attention,
       steps, colorIndex: s.colorIndex, subagents: s.subagents,
+      stopReason: s.stopReason, turnMs: s.turnMs,
+      turnStartedAt: s.turnStartedAt,
       startedAt: s.startedAt, lastEventAt: s.lastEventAt, endedAt: s.endedAt,
       fadeAt: s.endedAt ? s.endedAt + this.fadeMs : null,
       canFocus: Boolean(s.termBundleId || s.termProgram || s.pid),
@@ -162,6 +165,7 @@ class SessionStore extends EventEmitter {
         colorIndex: this._pickColor(e.session_id),
         startedAt: now, lastEventAt: now, endedAt: null,
         pid: null, termBundleId: null, termProgram: null,
+        turnStartedAt: null, turnMs: null, stopReason: null,
       };
       this.sessions.set(s.id, s);
     }
@@ -186,7 +190,7 @@ class SessionStore extends EventEmitter {
     if (e.claude_pid) s.pid = e.claude_pid;
     if (e.term_bundle_id) s.termBundleId = e.term_bundle_id;
     if (e.term_program) s.termProgram = e.term_program;
-    if (s.state === 'ended' || s.state === 'stale') { s.endedAt = null; s.state = 'working'; }
+    if (s.state === 'ended' || s.state === 'stale') { s.endedAt = null; s.state = 'working'; s.stopReason = null; }
 
     const fromSubagent = Boolean(e.agent_id);
     const prefix = fromSubagent && e.agent_type ? `[${e.agent_type}] ` : '';
@@ -216,6 +220,8 @@ class SessionStore extends EventEmitter {
 
       case 'UserPromptSubmit':
         s.state = 'working'; clearAttention();
+        // Prefer the hook's own timestamp (more accurate) when it's plausible.
+        s.turnStartedAt = typeof e.ts === 'number' && e.ts <= now + 5000 && e.ts >= now - 24 * 3600 * 1000 ? Math.min(e.ts, now) : now;
         s.activity = 'Thinking…';
         s.detail = e.prompt ? `“${short(e.prompt, 100)}”` : null;
         break;
@@ -248,7 +254,9 @@ class SessionStore extends EventEmitter {
 
       case 'PostToolUseFailure':
         if (e.is_interrupt) {
-          s.state = 'idle'; clearAttention();
+          s.state = 'stopped'; clearAttention();
+          s.stopReason = 'interrupted';
+          s.turnStartedAt = null;
           s.activity = 'Interrupted';
           notes.push({ kind: 'stopped', sessionId: s.id, title: `${s.name} was interrupted`, body: describeTool(e.tool_name, ti) });
         } else {
@@ -276,6 +284,8 @@ class SessionStore extends EventEmitter {
       case 'Stop': {
         if (fromSubagent) break;
         clearAttention();
+        if (prevState !== 'done') s.turnMs = now - (s.turnStartedAt || s.startedAt);
+        s.turnStartedAt = null;
         s.state = 'done';
         const bg = e.background_task_count || 0;
         s.activity = bg ? `Finished, ${bg} background task${bg > 1 ? 's' : ''} running` : 'Finished';
@@ -289,6 +299,8 @@ class SessionStore extends EventEmitter {
       case 'StopFailure':
         clearAttention();
         s.state = 'error';
+        s.stopReason = 'error';
+        s.turnStartedAt = null;
         s.activity = `Error: ${e.error || 'unknown'}`;
         s.detail = short(e.error_details || e.last_assistant_message, 120) || null;
         notes.push({ kind: 'error', sessionId: s.id, title: `${s.name} stopped with an error`, body: short(e.last_assistant_message || e.error_details || e.error || 'API error', 180) });
@@ -320,6 +332,7 @@ class SessionStore extends EventEmitter {
       case 'SessionEnd': {
         const wasBusy = prevState === 'working' || prevState === 'attention';
         this._end(s, e.reason === 'clear' ? 'Cleared' : 'Session ended', true);
+        if (wasBusy && e.reason !== 'clear' && e.reason !== 'resume') s.stopReason = 'ended';
         if (wasBusy && e.reason !== 'clear' && e.reason !== 'resume') {
           notes.push({ kind: 'stopped', sessionId: s.id, title: `${s.name} ended`, body: 'The session ended while Claude was still working.' });
         }
@@ -329,6 +342,9 @@ class SessionStore extends EventEmitter {
       default:
         break; // unknown event: just counts as a heartbeat
     }
+    // Turn timing for "Finished · 4m 12s": start at the prompt, or at the first sign of work.
+    if ((s.state === 'working' || s.state === 'attention') && !s.turnStartedAt) s.turnStartedAt = now;
+    if (s.state === 'working' || s.state === 'attention') { s.stopReason = null; s.turnMs = null; }
     this.emit('change');
     return notes;
   }
@@ -390,6 +406,7 @@ class SessionStore extends EventEmitter {
       if (s.pid && !this.isPidAlive(s.pid)) {
         const wasBusy = s.state === 'working' || s.state === 'attention';
         this._end(s, 'Claude process exited');
+        if (wasBusy) s.stopReason = 'exited';
         if (wasBusy) notes.push({ kind: 'stopped', sessionId: s.id, title: `${s.name} stopped`, body: 'The Claude Code process exited unexpectedly.' });
         changed = true;
         continue;
@@ -397,10 +414,11 @@ class SessionStore extends EventEmitter {
       const silentFor = now - s.lastEventAt;
       if ((s.state === 'working') && silentFor >= this.staleMs) {
         s.state = 'stale';
+        s.stopReason = 'no updates';
         s.activity = `No updates for ${Math.round(silentFor / 60000)} min`;
         notes.push({ kind: 'stale', sessionId: s.id, title: `${s.name} went quiet`, body: `No activity for ${Math.round(silentFor / 60000)} minutes. It may have stopped.` });
         changed = true;
-      } else if (!s.pid && (s.state === 'idle' || s.state === 'done' || s.state === 'stale' || s.state === 'error') && silentFor >= this.forgetMs) {
+      } else if (!s.pid && ['idle', 'done', 'stale', 'error', 'stopped'].includes(s.state) && silentFor >= this.forgetMs) {
         this.sessions.delete(s.id); changed = true;
       }
     }
