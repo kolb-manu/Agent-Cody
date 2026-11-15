@@ -1,0 +1,147 @@
+# Builds Agent Cody for macOS and Windows and publishes a GitHub Release.
+#
+#   Push a tag like v1.0.0  → test → build (macOS + Windows in parallel) → release with installers
+#   Run manually            → test → build; installers are attached to the run as artifacts.
+#                             (Pick a tag in "Use workflow from" to also publish that release.)
+#
+# No code signing and no secrets: the Mac app is ad-hoc signed (free, keeps the bundle valid),
+# the Windows installer is unsigned. See RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1' # tests don't need the Electron binary
+      - name: Run tests
+        run: npm test
+      - name: Tag matches package.json version
+        if: github.ref_type == 'tag'
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")"
+          if [ "$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match package.json version $VERSION. Bump the version (see RELEASING.md)."
+            exit 1
+          fi
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: test
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest   # Apple Silicon runner; builds both arm64 and x64
+            command: npx electron-builder --mac --publish never
+            files: dist/*.dmg
+          - name: Windows
+            os: windows-latest
+            command: npx electron-builder --win --publish never
+            files: dist/*.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build installers
+        run: ${{ matrix.command }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false' # never pick up a signing identity from the runner
+
+      - name: Check the Mac apps are validly (ad-hoc) signed
+        if: runner.os == 'macOS'
+        run: |
+          for app in "dist/mac-arm64/Agent Cody.app" "dist/mac/Agent Cody.app"; do
+            codesign --verify --deep --strict "$app"
+            echo "✓ $app"
+          done
+      - name: Smoke test, Mac (the app starts and its local server answers)
+        if: runner.os == 'macOS'
+        run: |
+          export AGENT_CODY_PORT=47999 AGENT_CODY_USER_DATA="$RUNNER_TEMP/cody-smoke"
+          "dist/mac-arm64/Agent Cody.app/Contents/MacOS/Agent Cody" &
+          PID=$!
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:47999/health; then echo; echo "✓ app is running"; kill $PID; exit 0; fi
+            sleep 0.5
+          done
+          kill $PID || true
+          echo "::error::The packaged app did not start"; exit 1
+      - name: Smoke test, Windows (the app starts and its local server answers)
+        if: runner.os == 'Windows'
+        continue-on-error: true # CI desktop sessions vary; don't block a release on this
+        shell: pwsh
+        run: |
+          $env:AGENT_CODY_PORT = '47999'
+          $env:AGENT_CODY_USER_DATA = Join-Path $env:RUNNER_TEMP 'cody-smoke'
+          $p = Start-Process -FilePath 'dist\win-unpacked\Agent Cody.exe' -PassThru
+          for ($i = 0; $i -lt 60; $i++) {
+            try { Invoke-RestMethod http://127.0.0.1:47999/health | Out-Null; Write-Host '✓ app is running'; Stop-Process -Id $p.Id -Force; exit 0 } catch { Start-Sleep -Milliseconds 500 }
+          }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          Write-Error 'The packaged app did not start'; exit 1
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v7
+        with:
+          name: installers-${{ matrix.name }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v8
+        with:
+          pattern: installers-*
+          path: installers
+          merge-multiple: true
+      - name: List files
+        run: ls -la installers
+      - name: Create release (or update it if it already exists)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" installers/* --clobber
+          else
+            gh release create "$TAG" installers/* \
+              --title "Agent Cody ${TAG#v}" \
+              --generate-notes \
+              --verify-tag
+          fi

@@ -26,7 +26,7 @@ Get the latest version from the **[Releases page](https://github.com/kolb-manu/A
 | --- | --- |
 | Mac with Apple Silicon (M1, M2, M3, M4…) | `Agent-Cody-…-mac-arm64.dmg` |
 | Mac with an Intel chip | `Agent-Cody-…-mac-x64.dmg` |
-| Windows 10 or 11 | `Agent-Cody-Setup-….exe` |
+| Windows 10 or 11 | `Agent-Cody-…-win-x64.exe` |
 
 Not sure which Mac you have? Click the Apple menu (top left) → **About This Mac**. If it says "Chip: Apple M…", it's Apple Silicon. If it says "Processor: Intel", it's Intel.
 
@@ -45,7 +45,7 @@ You only do this once. On older Macs (macOS 14 or earlier) there's a shortcut: *
 
 ### Windows
 
-1. Double-click `Agent-Cody-Setup-….exe`.
+1. Double-click `Agent-Cody-…-win-x64.exe`.
 2. If you see "Windows protected your PC", click **More info**, then **Run anyway**.
 3. It installs by itself in a few seconds (no admin password needed) and opens Agent Cody.
 
@@ -101,6 +101,8 @@ Open **Settings → Claude Code hooks → Uninstall** (or use the menu-bar/tray 
 
 ## Known limitations
 
+- **"Start when I log in" may not stick on a Mac.** Because the app isn't signed, macOS sometimes ignores the request. If Agent Cody doesn't open after you restart, add it by hand: **System Settings → General → Login Items** → click **+** under "Open at Login" → choose **Agent Cody** in Applications.
+- **First launch shows a warning** on both Mac and Windows, because the app isn't signed. See [Install](#install): on a Mac use **Open Anyway** (or right-click → **Open** on macOS 14 and older), on Windows **More info** → **Run anyway**.
 - Windows is less tested than Mac. If something doesn't work there, please let me know.
 - **Open** works best with Mac's Terminal and iTerm2 (it finds the exact tab). For other apps it brings the app to the front, and you pick the tab.
 
@@ -266,17 +268,17 @@ Most of these can be changed in the Settings panel. Edit `port`, `staleMinutes` 
 
 ### Build installers
 
-To publish a version for friends: run the builds, create a release on GitHub (**Releases → Draft a new release**, tag e.g. `v0.1.0`), and attach the two `.dmg` files and `Agent-Cody-Setup-<version>.exe`. The README's download table expects these file names.
+Releases are built and published automatically by GitHub Actions when you push a version tag. See **[RELEASING.md](RELEASING.md)**. The commands below are for local builds.
 
 ```bash
 npm run icons      # regenerates build/icon.png (already committed; only needed if you change the icon)
-npm run dist:mac   # → dist/Agent-Cody-<version>-mac-arm64.dmg and -mac-x64.dmg (+ .zip of each)
-npm run dist:win   # → dist/Agent-Cody-Setup-<version>.exe (installer) and Agent-Cody-Portable-<version>.exe
+npm run dist:mac   # → dist/Agent-Cody-<version>-mac-arm64.dmg and dist/Agent-Cody-<version>-mac-x64.dmg
+npm run dist:win   # → dist/Agent-Cody-<version>-win-x64.exe (per-user installer)
 npm run pack       # unpacked app for the current OS, for quick testing
 ```
 
-- **macOS:** builds are unsigned unless you configure signing (`CSC_LINK` / `CSC_KEY_PASSWORD`, plus notarization). Unsigned apps need **System Settings → Privacy & Security → Open Anyway** on first launch (macOS 15+), or right-click → **Open** on older versions. `dist:mac` builds both Apple Silicon and Intel.
-- **Windows:** the NSIS installer installs per user (`%LOCALAPPDATA%\Programs\agent-cody`, no admin rights). Updates install to the same folder, so the start-at-login entry keeps working. The portable build registers its own `.exe` location (`PORTABLE_EXECUTABLE_FILE`), so keep that file in one place. Build on Windows for the most reliable result. Building from macOS works for `--dir` and portable targets, but the NSIS installer and icon editing may need Wine. Without a code-signing certificate, SmartScreen warns on first run.
+- **macOS:** builds are *ad-hoc* signed (`"identity": "-"`, free, no certificate). This keeps the bundle valid, so downloads show the normal "unidentified developer" prompt rather than "app is damaged". For real signing, see RELEASING.md. Unsigned apps need **System Settings → Privacy & Security → Open Anyway** on first launch (macOS 15+), or right-click → **Open** on older versions. `dist:mac` builds both Apple Silicon and Intel.
+- **Windows:** the NSIS installer installs per user (`%LOCALAPPDATA%\Programs\agent-cody`, no admin rights). Updates install to the same folder, so the start-at-login entry keeps working. The installer can also be built from macOS (tested). Without a code-signing certificate, SmartScreen warns on first run.
 
 ### How it works
 
