@@ -1,24 +1,125 @@
 # Agent Cody
 
-A small, always-on-top desktop widget that shows live progress of every Claude Code session running on your machine, and sends a native notification when a session needs permission, asks a question, finishes, or stops.
+**A small widget that shows what all your Claude Code agents are doing, and taps you on the shoulder when one needs you.**
 
-- Compact rows, one per agent: status dot, project name, one-line activity, a small step bar with `3/5`, and an **Open** button.
-- Rows that need permission or an answer get an orange tint and a filled Open button until you handle them. Finished rows say `Finished · 4m 12s`; stopped or errored rows say `Stopped · error`. Ended sessions fade out.
-- Light and dark themes (or follow the OS), switchable from the header.
-- Minimises to a pill: `4 agents` with tiny per-agent bars, solid orange `infra-cli needs you` with an Open button, or `All 4 agents finished`. Position, size and minimised state are remembered.
-- Settings panel (gear icon): theme, which notifications you get, sound, keep on top, start at login.
-- A friendly first-run card asks whether to start at login, then offers to connect Claude Code (install hooks).
-- Tray / menu-bar icon to show or hide the widget, open settings, toggle sound, install or uninstall hooks, and quit.
-- Runs fully locally: the only network traffic is the hook talking to `127.0.0.1`.
+<p>
+  <img src="docs/screenshot-light.png" width="300" alt="Agent Cody in light mode, showing six agents: working, needs permission, needs an answer, finished and stopped">
+  &nbsp;
+  <img src="docs/screenshot-dark.png" width="300" alt="The same widget in dark mode">
+</p>
 
-Works on macOS and Windows (Electron, plain JavaScript, no native modules).
+> A hobby project made for friends. Free to use, no warranty. 🙂
 
-## Requirements
+## What it does
 
-- Node.js 18+ (for development, and on PATH for the hook. See [Known limitations](#known-limitations)).
+- 👀 Shows a live list of every Claude Code session running on your computer.
+- 📊 Progress bars show how far each agent is (for example "3/5" steps done).
+- 🔔 Sends a notification when an agent needs your permission, asks you something, or stops.
+- 🪟 Click **Open** to jump straight back to that agent's window.
+- 🌗 Light and dark mode, or follows your computer's setting.
+
+## Download
+
+Get the latest version from the **[Releases page](https://github.com/kolb-manu/Agent-Cody/releases)**. Pick the file for your computer:
+
+| Your computer | Download this file |
+| --- | --- |
+| Mac with Apple Silicon (M1, M2, M3, M4…) | `Agent-Cody-…-mac-arm64.dmg` |
+| Mac with an Intel chip | `Agent-Cody-…-mac-x64.dmg` |
+| Windows 10 or 11 | `Agent-Cody-Setup-….exe` |
+
+Not sure which Mac you have? Click the Apple menu (top left) → **About This Mac**. If it says "Chip: Apple M…", it's Apple Silicon. If it says "Processor: Intel", it's Intel.
+
+## Install
+
+The app isn't "signed" (registered with Apple or Microsoft, which costs money every year). So the first time you open it, your computer warns you. That's expected. Here's how to get past it:
+
+### Mac
+
+1. Open the `.dmg` file you downloaded.
+2. Drag **Agent Cody** into the **Applications** folder.
+3. Open **Applications** and double-click **Agent Cody**. You'll see a warning that it can't be opened. Click **Done**.
+4. Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to "Agent Cody". Confirm with your password, then click **Open**.
+
+You only do this once. On older Macs (macOS 14 or earlier) there's a shortcut: **right-click** the app → **Open** → **Open**.
+
+### Windows
+
+1. Double-click `Agent-Cody-Setup-….exe`.
+2. If you see "Windows protected your PC", click **More info**, then **Run anyway**.
+3. It installs by itself in a few seconds (no admin password needed) and opens Agent Cody.
+
+## First-time setup
+
+1. **Open Agent Cody.** It asks if it should start automatically when you log in. Your choice, and you can change it later.
+2. **Click "Install hooks".** Hooks are small connectors that let Claude Code tell the widget what it's doing. Agent Cody makes a backup of Claude Code's settings file first, and leaves anything else in it alone.
+3. **Restart any Claude Code sessions that were already open.** New sessions show up in the widget automatically.
+
+## Using it
+
+Each row is one agent. The coloured dot tells you how it's doing:
+
+| Dot | Meaning |
+| --- | --- |
+| 🟠 pulsing | **Working.** The bar shows its progress. |
+| 🟠 orange row | **Needs you.** It wants permission or asked a question. |
+| 🟢 green | **Finished**, with how long it took. |
+| 🩷 pink | **Stopped**, for example because of an error. |
+
+- **Open** (the arrow button on each row) brings you back to that agent's terminal or code editor window.
+- **Minimise:** click the ⌄ arrow at the top to shrink the widget into a small pill. Click the pill to make it big again. It turns orange when an agent needs you.
+- **Hide or bring it back:** use the Agent Cody icon in the menu bar (Mac, top right of the screen) or the system tray (Windows, next to the clock; it may be hidden under the **^** arrow).
+- **Theme:** the moon/sun button switches light and dark. In **Settings** (gear icon) you can pick **System** to follow your computer.
+- **Start at login:** turn it on or off any time in **Settings**.
+
+## Good to know
+
+- **It needs Node.js.** Node.js is a free program that the hooks use to run. If you don't have it, download the "LTS" version from [nodejs.org](https://nodejs.org) and install it like any other app.
+- **It only works with Claude Code** (in the terminal or your code editor), not with the normal Claude chat or Cowork.
+- **Progress bars only fill up when Claude makes a to-do list.** Otherwise you see a gentle moving bar and the word "working".
+- **Everything stays on your computer.** No account, no internet connection, and it uses none of your Claude usage.
+
+## Troubleshooting
+
+**The widget stays empty.**
+- Check that the hooks are installed: **Settings → Claude Code hooks** should say *Installed*. If not, click **Install**.
+- Sessions that were already open before you installed the hooks don't show up. Restart them.
+- Make sure Node.js is installed (see above).
+
+**I don't get notifications.**
+- Mac: **System Settings → Notifications → Agent Cody** → allow notifications.
+- Windows: **Settings → System → Notifications** → make sure Agent Cody is on.
+- Also check **Settings** inside Agent Cody, where you choose which events notify you.
+
+**The Mac says the app "is damaged" or there's no "Open Anyway" button.**
+- Try opening the app again: the **Open Anyway** button only shows up for a while after a blocked attempt.
+- If that doesn't help, open the **Terminal** app, paste this line and press Enter. It removes the "downloaded from the internet" flag:
+  `xattr -cr "/Applications/Agent Cody.app"`
+
+**How do I remove the hooks?**
+Open **Settings → Claude Code hooks → Uninstall** (or use the menu-bar/tray icon → *Uninstall Claude Code hooks*). Only Agent Cody's own entries are removed, and a backup is made first.
+
+## Known limitations
+
+- Windows is less tested than Mac. If something doesn't work there, please let me know.
+- **Open** works best with Mac's Terminal and iTerm2 (it finds the exact tab). For other apps it brings the app to the front, and you pick the tab.
+
+## Problems or ideas?
+
+Open an issue on **[GitHub Issues](https://github.com/kolb-manu/Agent-Cody/issues)** and describe what happened. A screenshot helps.
+
+---
+
+## For developers
+
+Everything below is for people who want to build, test or change Agent Cody.
+
+### Requirements
+
+- Node.js 18+ (for development, and on PATH for the hook. See [Known limitations](#technical-limitations)).
 - Claude Code with hooks support.
 
-## Install and run (development)
+### Install and run (development)
 
 ```bash
 npm install
@@ -27,7 +128,7 @@ npm start
 
 The widget appears in the top-right corner, and an icon appears in the menu bar (macOS) or system tray (Windows).
 
-## See it working without real agents
+### See it working without real agents
 
 With the app running, in a second terminal:
 
@@ -42,7 +143,7 @@ The showcase puts six agents on screen: working with a 3/5 plan, working without
 
 The simulation includes TodoWrite progress, Task-tool progress, subagents, a permission request (approved after ~10s), a question, a finished turn, an API error, and a session that ends and fades out. You get native notifications for the permission request, the question, the finishes and the error.
 
-## First run
+### First run (details)
 
 The first time the **installed** app starts, a small card inside the widget asks:
 
@@ -51,7 +152,7 @@ The first time the **installed** app starts, a small card inside the widget asks
 
 Nothing is turned on silently. If you never answer Yes, Agent Cody doesn't start at login. When running from source (`npm start`) the card doesn't appear. Set `AGENT_CODY_FORCE_ONBOARDING=1` to preview it.
 
-## Install the Claude Code hooks
+### Install the Claude Code hooks
 
 Pick one:
 
@@ -86,7 +187,7 @@ New Claude Code sessions pick up the hooks. If an already-running session doesn'
 
 **Uninstall:** use the tray menu, or run `npm run hooks:uninstall`. This removes only entries containing `agent-cody-hook` and makes a backup first. You can also delete `~/.agent-cody/`.
 
-## Using it
+### Using it (details)
 
 | Action | Result |
 | --- | --- |
@@ -109,7 +210,7 @@ Row states:
 | Pink | `Stopped · error` / `interrupted` / `no updates` / `exited` / `ended` | API error, Esc mid-tool, silent for `staleMinutes`, process vanished, or session ended mid-work |
 | Hollow | `Ready` | Session open, no prompt yet |
 
-### Settings
+#### Settings
 
 | Setting | Default |
 | --- | --- |
@@ -131,7 +232,7 @@ How it works: `src/main/login-item.js` wraps Electron's `app.setLoginItemSetting
 - **macOS:** registers through SMAppService and uses `status` and `wasOpenedAtLogin`.
 - **Windows:** writes a per-user Run entry (no admin) for the installed exe with a `--login` argument, which is how a login start is detected. It uses `executableWillLaunchAtLogin` so entries you disabled show as off. If the entry points at an old exe path, it's re-pointed on startup. The Settings panel also shows hook status, with Install/Reinstall/Uninstall buttons.
 
-### Open behaviour
+#### Open behaviour
 
 Best effort, and it never fails silently:
 
@@ -141,7 +242,7 @@ Best effort, and it never fails silently:
 4. **Windows:** walks up from the Claude process to its first ancestor with a window and activates it. Windows may only flash the taskbar button.
 5. **If none of that works:** opens the project folder in Finder/Explorer and says so. If the folder doesn't exist either, it shows a hint with the path.
 
-## Configuration
+### Configuration
 
 Settings live in `settings.json` in the app's data folder (tray → **Open settings folder**):
 
@@ -163,19 +264,21 @@ Settings live in `settings.json` in the app's data folder (tray → **Open setti
 
 Most of these can be changed in the Settings panel. Edit `port`, `staleMinutes` and `fadeSeconds` in the file while the app is closed. Settings files from 0.1 (`muted`, `notifyOn`) are migrated automatically. Window position, size and minimised state carry over. On start, the app writes the port to `~/.agent-cody/config.json`, and the hook reads it from there, so you don't need to reinstall hooks after changing the port. `AGENT_CODY_PORT=<n>` overrides the port temporarily for both the app and the simulator, without touching the hook config. `AGENT_CODY_USER_DATA=<dir>` uses a separate profile, which is handy for testing.
 
-## Build installers
+### Build installers
+
+To publish a version for friends: run the builds, create a release on GitHub (**Releases → Draft a new release**, tag e.g. `v0.1.0`), and attach the two `.dmg` files and `Agent-Cody-Setup-<version>.exe`. The README's download table expects these file names.
 
 ```bash
 npm run icons      # regenerates build/icon.png (already committed; only needed if you change the icon)
-npm run dist:mac   # → dist/Agent Cody-<version>-arm64.dmg and .zip
-npm run dist:win   # → dist/Agent Cody Setup <version>.exe (NSIS) and a portable .exe
+npm run dist:mac   # → dist/Agent-Cody-<version>-mac-arm64.dmg and -mac-x64.dmg (+ .zip of each)
+npm run dist:win   # → dist/Agent-Cody-Setup-<version>.exe (installer) and Agent-Cody-Portable-<version>.exe
 npm run pack       # unpacked app for the current OS, for quick testing
 ```
 
-- **macOS:** builds are unsigned unless you configure signing (`CSC_LINK` / `CSC_KEY_PASSWORD`, plus notarization). For an unsigned app, right-click → **Open** the first time. Build for Intel with `npx electron-builder --mac --x64`.
+- **macOS:** builds are unsigned unless you configure signing (`CSC_LINK` / `CSC_KEY_PASSWORD`, plus notarization). Unsigned apps need **System Settings → Privacy & Security → Open Anyway** on first launch (macOS 15+), or right-click → **Open** on older versions. `dist:mac` builds both Apple Silicon and Intel.
 - **Windows:** the NSIS installer installs per user (`%LOCALAPPDATA%\Programs\agent-cody`, no admin rights). Updates install to the same folder, so the start-at-login entry keeps working. The portable build registers its own `.exe` location (`PORTABLE_EXECUTABLE_FILE`), so keep that file in one place. Build on Windows for the most reliable result. Building from macOS works for `--dir` and portable targets, but the NSIS installer and icon editing may need Wine. Without a code-signing certificate, SmartScreen warns on first run.
 
-## How it works
+### How it works
 
 ```
 Claude Code ──hook (stdin JSON)──▶ node ~/.agent-cody/agent-cody-hook.js
@@ -196,11 +299,11 @@ Claude Code ──hook (stdin JSON)──▶ node ~/.agent-cody/agent-cody-hook.
 
 Run the tests with `npm test`. They cover the reducer (states, turn timing, stop reasons), settings defaults and migration, installer safety (preserving hooks, idempotency, invalid JSON, uninstall restoring the original file), and the hook script (exits fast with no app running, drops file contents).
 
-## Privacy
+### Privacy
 
 Everything stays on your machine. The hook sends only the session id, project path, event name, tool name, short descriptions (file name, command or description, search pattern, truncated prompt or last message), to-do statuses, and terminal identification for the Open button. It never sends file contents, diffs or transcripts. The app makes no outbound network requests.
 
-## Known limitations
+### Technical limitations
 
 - **Open is best effort** (see [Open behaviour](#open-behaviour)).
   - Exact-tab focus only works for Terminal.app and iTerm2, and only for sessions started after the hooks were installed (it needs the Claude process id).
