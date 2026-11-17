@@ -81,6 +81,7 @@ Each row is one agent. The coloured dot tells you how it's doing:
 - **Hide or bring it back:** use the Agent Cody icon in the menu bar (Mac, top right of the screen) or the system tray (Windows, next to the clock; it may be hidden under the **^** arrow).
 - **Theme:** the moon/sun button switches light and dark. In **Settings** (gear icon) you can pick **System** to follow your computer.
 - **Start at login:** turn it on or off any time in **Settings**.
+- **Size:** the widget grows and shrinks to fit your agents. Drag the sides to change the width. To size it by hand instead, turn off **Settings → Resize to fit agents**.
 
 ## Telegram alerts
 
@@ -248,6 +249,7 @@ Row states:
 | Notify when an agent finishes | Off |
 | Play a sound | On |
 | Keep on top of other windows | On |
+| Resize to fit agents (height follows the list, up to the bottom of the screen; width stays yours) | On |
 | Start when I log in | Off, unless you said Yes on first launch |
 | Updates: Check automatically (10 s after start, then every 6 hours) | On |
 | Telegram: Send alerts to Telegram (once connected) | On |

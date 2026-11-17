@@ -115,3 +115,17 @@ test('telegram switches are validated booleans; chat ID, name and disconnected a
   s.flush();
   assert.deepEqual(new Settings(d).get('telegram'), { chatId: null, name: null, enabled: false, onlyWhenAway: true, includePreview: false, disconnected: false });
 });
+
+test('autoHeight ("Resize to fit agents") is on by default and a validated boolean', () => {
+  const d = dir();
+  const s = new Settings(d);
+  assert.equal(s.get('autoHeight'), true);
+  assert.equal(s.setUser('autoHeight', 'off'), false);
+  assert.equal(s.setUser('autoHeight', false), true);
+  s.flush();
+  assert.equal(new Settings(d).get('autoHeight'), false);
+
+  const old = dir();
+  fs.writeFileSync(path.join(old, 'settings.json'), JSON.stringify({ theme: 'dark', bounds: { x: 1, y: 2, width: 340, height: 300 } }));
+  assert.equal(new Settings(old).get('autoHeight'), true, 'settings from 0.2.1 get it on');
+});

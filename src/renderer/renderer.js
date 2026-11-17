@@ -118,6 +118,7 @@ function createRow(s) {
 
   const entry = { el: row, refs: { name, activity, bar, fill, meta, status } };
   rows.set(s.id, entry);
+  sizeObserver.observe(row);
   return entry;
 }
 
@@ -162,7 +163,8 @@ function removeRow(id, immediate) {
   rows.delete(id);
   clearTimeout(entry.fadeTimer);
   entry.el.classList.add('leaving');
-  setTimeout(() => entry.el.remove(), immediate ? 160 : 500);
+  // The window shrinks only after the leaving animation, once the row is really gone.
+  setTimeout(() => { entry.el.remove(); scheduleMeasure(); }, immediate ? 160 : 500);
 }
 
 // ---------- pill ----------
@@ -199,6 +201,51 @@ function renderPill(active) {
   }));
 }
 
+// ---------- resize to fit agents ----------
+// The renderer measures the natural content height; main resizes the window (see fit.js).
+// #list and .empty are flex: 1, so their own boxes always fill the window: add up their children instead.
+
+function outerHeight(node) {
+  const cs = getComputedStyle(node);
+  return node.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+}
+
+/** Height a container would have if it weren't stretched: padding + border + visible children + gaps. */
+function naturalHeight(node) {
+  const cs = getComputedStyle(node);
+  const kids = [...node.children].filter((c) => !c.hidden && getComputedStyle(c).display !== 'none');
+  const gap = parseFloat(cs.rowGap) || 0;
+  return ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((a, k) => a + (parseFloat(cs[k]) || 0), 0)
+    + kids.reduce((a, c) => a + outerHeight(c), 0) + gap * Math.max(0, kids.length - 1);
+}
+
+function contentHeight() {
+  const cs = getComputedStyle(els.expanded);
+  let h = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+  for (const child of els.expanded.children) {
+    if (child.hidden || child === els.toast || child === els.settings) continue;
+    h += child === els.list || child === els.empty ? naturalHeight(child) : outerHeight(child);
+  }
+  return Math.ceil(h);
+}
+
+let measureFrame = 0;
+let lastSent = { height: -1, view: null };
+function scheduleMeasure() {
+  if (measureFrame) return;
+  measureFrame = requestAnimationFrame(() => {
+    measureFrame = 0;
+    if (els.expanded.hidden) return; // pill mode: main keeps the last expanded measurement
+    const height = contentHeight();
+    if (lastSent.view === view && Math.abs(height - lastSent.height) < 1) return;
+    lastSent = { height, view };
+    cody.contentHeight(height, view);
+  });
+}
+
+// Safety net for size changes that don't go through render() (text wrapping, fonts, the banner…).
+const sizeObserver = new ResizeObserver(() => scheduleMeasure());
+
 // ---------- render ----------
 function render() {
   const ids = new Set(sessions.map((s) => s.id));
@@ -217,6 +264,7 @@ function render() {
 }
 
 function renderView() {
+  scheduleMeasure();
   const inSettings = view === 'settings';
   els.settings.hidden = !inSettings;
   els.list.hidden = inSettings;
@@ -476,6 +524,7 @@ cody.onReveal((id) => {
   setTimeout(() => entry.el.classList.remove('flash'), 1800);
 });
 
+for (const id of ['banner', 'onboarding', 'empty-text', 'btn-install']) sizeObserver.observe($(id));
 renderUi();
 render();
 cody.ready();

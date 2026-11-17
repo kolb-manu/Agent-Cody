@@ -13,6 +13,7 @@ const DEFAULTS = {
   notify: { attention: true, stopped: true, finished: false },
   sound: true,
   alwaysOnTop: true,
+  autoHeight: true,         // expanded widget's height follows its content
   // "Start when I log in" is deliberately NOT stored here: the OS is the source of truth (login-item.js).
   onboarding: { loginAsked: false, hooksAsked: false },
   staleMinutes: 10,
@@ -31,6 +32,7 @@ const USER_SETTINGS = {
   theme: (v) => ['light', 'dark', 'system'].includes(v),
   sound: (v) => typeof v === 'boolean',
   alwaysOnTop: (v) => typeof v === 'boolean',
+  autoHeight: (v) => typeof v === 'boolean',
   checkUpdates: (v) => typeof v === 'boolean',
   'notify.attention': (v) => typeof v === 'boolean',
   'notify.stopped': (v) => typeof v === 'boolean',

@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('cody', {
   onShowSettings: (cb) => ipcRenderer.on('show-settings', () => cb()),
   ready: () => ipcRenderer.send('ui-ready'),
   toggleCollapse: () => ipcRenderer.send('toggle-collapse'),
+  contentHeight: (px, view) => ipcRenderer.send('content-height', px, view),
   installHooks: () => ipcRenderer.send('install-hooks'),
   uninstallHooks: () => ipcRenderer.send('uninstall-hooks'),
   dismiss: (id) => ipcRenderer.send('dismiss', id),

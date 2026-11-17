@@ -12,6 +12,7 @@ const hooks = require('./hooks-installer');
 const { createLoginItem, LOGIN_ARG } = require('./login-item');
 const updateCheck = require('./update-check');
 const telegramLib = require('./telegram');
+const fit = require('./fit');
 
 const IS_MAC = process.platform === 'darwin';
 const IS_WIN = process.platform === 'win32';
@@ -38,6 +39,8 @@ let previewTheme = null; // transient theme override from the simulator showcase
 let openedAtLogin = false;
 /** status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'up-to-date' | 'error' */
 let update = { status: 'idle', version: null, message: null };
+/** Last content height and view reported by the renderer, for "Resize to fit agents". */
+let content = { height: null, view: 'list' };
 const loginItem = createLoginItem({ app });
 const icons = {};
 
@@ -178,6 +181,7 @@ function setCollapsed(collapsed) {
   if (collapsed) {
     settings.set('bounds', win.getBounds());
     settings.set('collapsed', true);
+    unlockHeight();
     win.setMinimumSize(PILL.width, PILL.height);
     win.setResizable(false);
     win.setBounds(anchoredBounds(win.getBounds(), PILL));
@@ -187,8 +191,56 @@ function setCollapsed(collapsed) {
     win.setResizable(true);
     win.setMinimumSize(MIN_EXPANDED.width, MIN_EXPANDED.height);
     win.setBounds(clampToScreen(anchoredBoundsInverse(win.getBounds(), prev)));
+    applyFit({ animate: false }); // fit the content now instead of keeping a stale saved height
   }
   sendUiState();
+}
+
+// ---------- resize to fit agents ----------
+
+function autoHeightOn() { return settings.get('autoHeight') !== false; }
+
+/** Back to today's behaviour: freely resizable, normal minimum, no maximum. */
+function unlockHeight() {
+  if (!win || win.isDestroyed()) return;
+  win.setMaximumSize(0, 0); // 0 = unbounded
+  // Normal minimum, unless the fitted window is already shorter (one agent): then keep its size.
+  const h = settings.get('collapsed') ? MIN_EXPANDED.height : win.getBounds().height;
+  win.setMinimumSize(MIN_EXPANDED.width, Math.min(MIN_EXPANDED.height, h));
+}
+
+function setHeight(height, { animate, lock }) {
+  const b = win.getBounds();
+  // Lift the old lock first: setBounds is clamped by the current min/max size.
+  win.setMaximumSize(0, 0);
+  win.setMinimumSize(MIN_EXPANDED.width, Math.min(fit.MIN_FIT_HEIGHT, height));
+  if (b.height !== height) win.setBounds({ ...b, height }, animate && IS_MAC);
+  if (lock) {
+    // Width stays free; height is pinned to the fitted value (0 = unbounded width).
+    win.setMinimumSize(MIN_EXPANDED.width, height);
+    win.setMaximumSize(0, height);
+  } else {
+    win.setMinimumSize(MIN_EXPANDED.width, Math.min(MIN_EXPANDED.height, height));
+  }
+}
+
+/** Fit the expanded window to the renderer's last measurement (or make room for Settings). */
+function applyFit({ animate = true } = {}) {
+  if (!win || win.isDestroyed() || settings.get('collapsed') || !autoHeightOn()) return;
+  const b = win.getBounds();
+  const workArea = workAreaFor(b);
+  const visible = animate && win.isVisible();
+  if (content.view === 'settings') {
+    setHeight(fit.settingsHeight({ height: b.height, top: b.y, workArea }), { animate: visible, lock: false });
+    return;
+  }
+  const height = fit.fitHeight({ content: content.height, top: b.y, workArea });
+  if (height != null) setHeight(height, { animate: visible, lock: true });
+}
+
+function onContentHeight(height, view) {
+  content = { height: Number(height) || null, view: view === 'settings' ? 'settings' : 'list' };
+  applyFit();
 }
 
 function showWindow({ focus = true, expand = false } = {}) {
@@ -234,6 +286,7 @@ function sendUiState() {
     sound: settings.get('sound') !== false,
     notify: settings.get('notify'),
     alwaysOnTop: settings.get('alwaysOnTop') !== false,
+    autoHeight: autoHeightOn(),
     loginItem: loginItem.get(), // read from the OS every time, never cached
     onboarding: onboardingStep(),
     hookStatus,
@@ -381,6 +434,7 @@ function updateSetting(key, value) {
   if (!settings.setUser(key, value)) return false;
   if (key === 'theme') { previewTheme = null; applyTheme(); }
   if (key === 'alwaysOnTop') applyAlwaysOnTop();
+  if (key === 'autoHeight') { if (value) applyFit(); else unlockHeight(); }
   if (key === 'checkUpdates' && value) checkForUpdates();
   sendUiState();
   return true;
@@ -578,6 +632,7 @@ function scheduleUpdateChecks() {
 function registerIpc() {
   ipcMain.on('ui-ready', () => { sendUiState(); scheduleSessionsSend(); });
   ipcMain.on('toggle-collapse', () => setCollapsed(!settings.get('collapsed')));
+  ipcMain.on('content-height', (_e, height, view) => onContentHeight(height, String(view)));
   ipcMain.on('install-hooks', () => installHooks());
   ipcMain.on('uninstall-hooks', () => uninstallHooks());
   ipcMain.on('dismiss', (_e, id) => store.dismiss(String(id)));
