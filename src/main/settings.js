@@ -20,6 +20,8 @@ const DEFAULTS = {
   collapsed: false,
   hidden: false,            // window hidden to the tray (restored as-is when started at login)
   bounds: null,             // {x, y, width, height} of the expanded window
+  checkUpdates: true,       // look for new versions on launch and every few hours
+  updateNotified: null,     // last version we showed a "new version" notification for
 };
 
 /** Keys the UI may change, with validators. */
@@ -27,6 +29,7 @@ const USER_SETTINGS = {
   theme: (v) => ['light', 'dark', 'system'].includes(v),
   sound: (v) => typeof v === 'boolean',
   alwaysOnTop: (v) => typeof v === 'boolean',
+  checkUpdates: (v) => typeof v === 'boolean',
   'notify.attention': (v) => typeof v === 'boolean',
   'notify.stopped': (v) => typeof v === 'boolean',
   'notify.finished': (v) => typeof v === 'boolean',

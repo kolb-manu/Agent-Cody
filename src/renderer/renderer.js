@@ -299,14 +299,50 @@ function renderUi() {
   $('btn-hooks-uninstall').hidden = ui.hookStatus === 'not-installed';
   $('port').textContent = String(ui.port || '');
 
+  renderUpdate();
+  const upd = ui.update || {};
+  const updateBanner = upd.status === 'ready' ? `Agent Cody ${upd.version} is ready · Restart to update`
+    : upd.status === 'available' ? `Agent Cody ${upd.version} is available · Download` : null;
+  els.banner.dataset.action = '';
   if (ui.serverError) {
     els.banner.hidden = false; els.banner.className = 'banner'; els.banner.textContent = ui.serverError;
+  } else if (updateBanner) {
+    els.banner.hidden = false; els.banner.className = 'banner info'; els.banner.textContent = updateBanner;
+    els.banner.dataset.action = upd.status === 'ready' ? 'install' : 'download';
   } else if (ui.hookStatus === 'partial' && sessions.length) {
     els.banner.hidden = false; els.banner.className = 'banner info'; els.banner.textContent = 'Some hooks are missing. Click to reinstall.';
+    els.banner.dataset.action = 'hooks';
   } else {
     els.banner.hidden = true;
   }
   renderView();
+}
+
+function renderUpdate() {
+  const upd = ui.update || { status: 'idle' };
+  $('app-version').textContent = ui.appVersion ? `Version ${ui.appVersion}` : '';
+  const text = {
+    checking: 'Checking…',
+    available: `Agent Cody ${upd.version} is available.`,
+    downloading: `Downloading Agent Cody ${upd.version}…`,
+    ready: `Agent Cody ${upd.version} is downloaded. Restart to update, or it updates next time you quit.`,
+    'up-to-date': 'You’re up to date.',
+    error: upd.message || 'Couldn’t check for updates.',
+  }[upd.status] || '';
+  const status = $('update-status');
+  status.textContent = upd.status === 'available' && upd.message ? `${text} ${upd.message}` : text;
+  status.hidden = !status.textContent;
+  const btn = $('btn-update');
+  btn.textContent = upd.status === 'ready' ? 'Restart to update' : upd.status === 'available' ? 'Download' : 'Check for updates';
+  btn.className = upd.status === 'ready' || upd.status === 'available' ? 'btn primary' : 'btn';
+  btn.disabled = upd.status === 'checking' || upd.status === 'downloading';
+  btn.dataset.action = upd.status === 'ready' ? 'install' : upd.status === 'available' ? 'download' : 'check';
+}
+
+function runUpdateAction(action) {
+  if (action === 'install') cody.installUpdate();
+  else if (action === 'download') cody.downloadUpdate();
+  else cody.checkForUpdates();
 }
 
 let toastTimer = null;
@@ -346,7 +382,12 @@ els.pillOpen.addEventListener('click', () => openSession(els.pillOpen.dataset.id
 els.btnInstall.addEventListener('click', () => cody.installHooks());
 $('btn-hooks-install').addEventListener('click', () => cody.installHooks());
 $('btn-hooks-uninstall').addEventListener('click', () => cody.uninstallHooks());
-els.banner.addEventListener('click', () => { if (els.banner.classList.contains('info')) cody.installHooks(); });
+els.banner.addEventListener('click', () => {
+  const action = els.banner.dataset.action;
+  if (action === 'hooks') cody.installHooks();
+  else if (action === 'install' || action === 'download') runUpdateAction(action);
+});
+$('btn-update').addEventListener('click', (e) => runUpdateAction(e.currentTarget.dataset.action));
 for (const b of document.querySelectorAll('[data-theme-choice]')) b.addEventListener('click', () => cody.setSetting('theme', b.dataset.themeChoice));
 for (const input of document.querySelectorAll('[data-setting]')) input.addEventListener('change', () => cody.setSetting(input.dataset.setting, input.checked));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && view === 'settings') { view = 'list'; renderView(); } });

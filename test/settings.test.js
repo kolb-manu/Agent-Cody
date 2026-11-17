@@ -17,6 +17,24 @@ test('defaults: system theme, finished notifications off, everything else on', (
   assert.equal(s.get('openAtLogin'), undefined, 'login item is read from the OS, never stored');
   assert.deepEqual(s.get('onboarding'), { loginAsked: false, hooksAsked: false });
   assert.equal(s.get('hidden'), false);
+  assert.equal(s.get('checkUpdates'), true);
+  assert.equal(s.get('updateNotified'), null);
+});
+
+test('checkUpdates is a validated boolean; updateNotified is not UI-editable', () => {
+  const d = dir();
+  const s = new Settings(d);
+  assert.equal(s.setUser('checkUpdates', 'no'), false);
+  assert.equal(s.setUser('checkUpdates', false), true);
+  assert.equal(s.setUser('updateNotified', '9.9.9'), false);
+  s.flush();
+  assert.equal(new Settings(d).get('checkUpdates'), false);
+});
+
+test('settings from v0.1.0 (before the updater) get checkUpdates on', () => {
+  const d = dir();
+  fs.writeFileSync(path.join(d, 'settings.json'), JSON.stringify({ theme: 'dark', onboarding: { loginAsked: true, hooksAsked: true } }));
+  assert.equal(new Settings(d).get('checkUpdates'), true);
 });
 
 test('migrates v0.1 settings (muted / notifyOn) without losing window state', () => {

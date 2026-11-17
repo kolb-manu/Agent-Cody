@@ -34,6 +34,13 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kolb-manu",
+        "repo": "Agent-Cody"
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
@@ -77,5 +84,8 @@
   "devDependencies": {
     "electron": "^45.3.2",
     "electron-builder": "^26.18.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
   }
 }

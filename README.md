@@ -55,6 +55,15 @@ You only do this once. On older Macs (macOS 14 or earlier) there's a shortcut: *
 2. **Click "Install hooks".** Hooks are small connectors that let Claude Code tell the widget what it's doing. Agent Cody makes a backup of Claude Code's settings file first, and leaves anything else in it alone.
 3. **Restart any Claude Code sessions that were already open.** New sessions show up in the widget automatically.
 
+## Updating
+
+From version 0.2.0 on, Agent Cody looks for new versions by itself (you can turn this off in **Settings → Updates**).
+
+- **Windows** updates itself. When a new version is downloaded, the widget says **Restart to update**. Click it, or just carry on: it updates the next time you quit Agent Cody.
+- **Mac** tells you when there's a new version. Click **Download** in the widget, open the downloaded `.dmg`, quit Agent Cody (menu-bar icon → **Quit Agent Cody**), then drag the new **Agent Cody** into **Applications** and choose **Replace**. Your settings and hooks are kept. If macOS warns you again, allow it the same way as the first time (see [Install](#install)).
+
+If you're on 0.1.0, install 0.2.0 by hand once. After that, the app tells you about new versions.
+
 ## Using it
 
 Each row is one agent. The coloured dot tells you how it's doing:
@@ -77,7 +86,7 @@ Each row is one agent. The coloured dot tells you how it's doing:
 - **It needs Node.js.** Node.js is a free program that the hooks use to run. If you don't have it, download the "LTS" version from [nodejs.org](https://nodejs.org) and install it like any other app.
 - **It only works with Claude Code** (in the terminal or your code editor), not with the normal Claude chat or Cowork.
 - **Progress bars only fill up when Claude makes a to-do list.** Otherwise you see a gentle moving bar and the word "working".
-- **Everything stays on your computer.** No account, no internet connection, and it uses none of your Claude usage.
+- **Everything stays on your computer.** No account, and it uses none of your Claude usage. The only thing it asks the internet is whether there's a new version (on GitHub).
 
 ## Troubleshooting
 
@@ -223,6 +232,7 @@ Row states:
 | Play a sound | On |
 | Keep on top of other windows | On |
 | Start when I log in | Off, unless you said Yes on first launch |
+| Updates: Check automatically (10 s after start, then every 6 hours) | On |
 
 All settings persist between launches.
 
@@ -260,7 +270,8 @@ Settings live in `settings.json` in the app's data folder (tray → **Open setti
   "alwaysOnTop": true,
   "openAtLogin": true,
   "staleMinutes": 10,
-  "fadeSeconds": 8
+  "fadeSeconds": 8,
+  "checkUpdates": true
 }
 ```
 
@@ -297,13 +308,14 @@ Claude Code ──hook (stdin JSON)──▶ node ~/.agent-cody/agent-cody-hook.
 - `src/main/hooks-installer.js`: safe merge into, and removal from, `~/.claude/settings.json`.
 - `src/main/focus.js`: best-effort window focusing (tty matching, editor folders, app activation).
 - `src/main/settings.js`: persisted settings with validation and migration.
+- `src/main/update-check.js`: macOS update check (version comparison, picking the DMG), pure and unit-tested. Windows uses `electron-updater`.
 - `src/main/main.js`: window, tray, IPC and notifications wiring. `src/renderer/`: the UI.
 
 Run the tests with `npm test`. They cover the reducer (states, turn timing, stop reasons), settings defaults and migration, installer safety (preserving hooks, idempotency, invalid JSON, uninstall restoring the original file), and the hook script (exits fast with no app running, drops file contents).
 
 ### Privacy
 
-Everything stays on your machine. The hook sends only the session id, project path, event name, tool name, short descriptions (file name, command or description, search pattern, truncated prompt or last message), to-do statuses, and terminal identification for the Open button. It never sends file contents, diffs or transcripts. The app makes no outbound network requests.
+Everything stays on your machine. The hook sends only the session id, project path, event name, tool name, short descriptions (file name, command or description, search pattern, truncated prompt or last message), to-do statuses, and terminal identification for the Open button. It never sends file contents, diffs or transcripts. The only outbound request is the update check: on macOS a GET to `api.github.com/repos/kolb-manu/Agent-Cody/releases/latest`, on Windows electron-updater reading `latest.yml` from the GitHub Release (and downloading the installer). No session data is sent, and it can be turned off in Settings. Running from source never checks unless `AGENT_CODY_FORCE_UPDATE_CHECK=1` is set. See [RELEASING.md](RELEASING.md#in-app-updates).
 
 ### Technical limitations
 

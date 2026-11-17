@@ -81,6 +81,17 @@
         </div>
         <p class="note">Local only · listening on 127.0.0.1:<span id="port"></span></p>
       </div>
+
+      <div class="group">
+        <div class="label">Updates</div>
+        <div class="hook-row">
+          <span id="app-version" class="hook-status"></span>
+          <span class="spacer"></span>
+          <button id="btn-update" class="btn">Check for updates</button>
+        </div>
+        <p class="note" id="update-status" role="status" hidden></p>
+        <label class="switch-row"><span>Check automatically</span><input type="checkbox" role="switch" data-setting="checkUpdates"></label>
+      </div>
     </section>
 
     <div id="toast" class="toast" role="status"></div>

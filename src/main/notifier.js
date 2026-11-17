@@ -44,6 +44,19 @@ class Notifier {
     // Don't hold references forever if the OS never reports close.
     setTimeout(drop, 10 * 60 * 1000).unref?.();
   }
+
+  /** A notification about the app itself (e.g. a new version), not about a session. */
+  notifyApp({ title, body, onClick }) {
+    if (!Notification.isSupported()) return;
+    const notif = new Notification({ title, body: body || '', silent: this.settings.get('sound') === false });
+    this.live.add(notif);
+    const drop = () => this.live.delete(notif);
+    notif.on('click', () => { drop(); if (onClick) onClick(); });
+    notif.on('close', drop);
+    notif.on('failed', drop);
+    notif.show();
+    setTimeout(drop, 10 * 60 * 1000).unref?.();
+  }
 }
 
 module.exports = { Notifier, CATEGORY };

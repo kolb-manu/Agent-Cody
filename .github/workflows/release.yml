@@ -59,7 +59,11 @@ jobs:
           - name: Windows
             os: windows-latest
             command: npx electron-builder --win --publish never
-            files: dist/*.exe
+            # latest.yml + .blockmap let installed copies find and download this version (electron-updater)
+            files: |
+              dist/*.exe
+              dist/*.exe.blockmap
+              dist/latest.yml
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -106,6 +110,18 @@ jobs:
           }
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
           Write-Error 'The packaged app did not start'; exit 1
+
+      - name: Check the Windows update files match the installer
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          EXE="$(cd dist && ls *.exe)"
+          echo "installer: $EXE"; cat dist/latest.yml
+          grep -qx "path: $EXE" dist/latest.yml || { echo "::error::latest.yml doesn't point at $EXE"; exit 1; }
+          test -f "dist/$EXE.blockmap" || { echo "::error::dist/$EXE.blockmap is missing"; exit 1; }
+          test -f "dist/win-unpacked/resources/app-update.yml" || { echo "::error::app-update.yml is missing from the app"; exit 1; }
+          if grep -q publisherName dist/win-unpacked/resources/app-update.yml; then echo "::error::publisherName is set, so unsigned updates would be rejected"; exit 1; fi
+          echo "✓ update files OK"
 
       - name: Upload installers
         uses: actions/upload-artifact@v7

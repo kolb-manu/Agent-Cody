@@ -18,4 +18,7 @@ contextBridge.exposeInMainWorld('cody', {
   refreshUiState: () => ipcRenderer.send('refresh-ui-state'),
   openLoginItems: () => ipcRenderer.send('open-login-items'),
   answerOnboarding: (step, yes) => ipcRenderer.send('onboarding-answer', step, yes),
+  checkForUpdates: () => ipcRenderer.send('check-for-updates'),
+  downloadUpdate: () => ipcRenderer.send('download-update'),
+  installUpdate: () => ipcRenderer.send('install-update'),
 });

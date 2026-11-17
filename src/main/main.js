@@ -1,7 +1,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme, screen, dialog, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme, screen, dialog, shell, net } = require('electron');
 const { SessionStore } = require('./sessions');
 const { startServer } = require('./server');
 const { Settings } = require('./settings');
@@ -10,6 +10,7 @@ const { focusSession } = require('./focus');
 const { mascotPNG } = require('./icon-draw');
 const hooks = require('./hooks-installer');
 const { createLoginItem, LOGIN_ARG } = require('./login-item');
+const updateCheck = require('./update-check');
 
 const IS_MAC = process.platform === 'darwin';
 const IS_WIN = process.platform === 'win32';
@@ -18,6 +19,8 @@ const MIN_EXPANDED = { width: 300, height: 120 };
 const DEFAULT_EXPANDED = { width: 340, height: 300 };
 const BG = { light: '#FFFFFF', dark: '#1F1E1D' };
 const HOOK_SOURCE = path.join(__dirname, '..', '..', 'hook', 'agent-cody-hook.js');
+const UPDATE_FIRST_CHECK_MS = 10 * 1000;
+const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 // Dev/testing: isolate profile (settings + window state) from your real one.
 if (process.env.AGENT_CODY_USER_DATA) app.setPath('userData', process.env.AGENT_CODY_USER_DATA);
@@ -32,6 +35,8 @@ let serverError = null;
 let hookStatus = 'not-installed';
 let previewTheme = null; // transient theme override from the simulator showcase
 let openedAtLogin = false;
+/** status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'up-to-date' | 'error' */
+let update = { status: 'idle', version: null, message: null };
 const loginItem = createLoginItem({ app });
 const icons = {};
 
@@ -234,6 +239,9 @@ function sendUiState() {
     port: settings.get('port'),
     serverError,
     platform: process.platform,
+    appVersion: app.getVersion(),
+    checkUpdates: settings.get('checkUpdates') !== false,
+    update,
   });
   updateTrayMenu();
 }
@@ -305,6 +313,10 @@ function menuTemplate() {
     { label: settings.get('collapsed') ? 'Expand' : 'Minimise to pill', click: () => setCollapsed(!settings.get('collapsed')) },
     { label: 'Settings…', click: () => { showWindow({ expand: true }); sendToRenderer('show-settings'); } },
     { type: 'separator' },
+    ...(update.status === 'available' && IS_MAC ? [{ label: `Download Agent Cody ${update.version}`, click: () => { showWindow({ expand: true }); downloadUpdate(); } }] : []),
+    ...(update.status === 'ready' ? [{ label: 'Restart to update', click: () => installUpdate() }] : []),
+    { label: 'Check for updates…', enabled: update.status !== 'checking', click: () => { showWindow({ expand: true }); sendToRenderer('show-settings'); checkForUpdates({ manual: true }); } },
+    { type: 'separator' },
     { label: 'Play a sound', type: 'checkbox', checked: settings.get('sound') !== false, click: () => updateSetting('sound', !(settings.get('sound') !== false)) },
     { type: 'separator' },
     { label: hookStatus === 'installed' ? 'Reinstall Claude Code hooks…' : 'Install Claude Code hooks…', click: () => installHooks() },
@@ -367,6 +379,7 @@ function updateSetting(key, value) {
   if (!settings.setUser(key, value)) return false;
   if (key === 'theme') { previewTheme = null; applyTheme(); }
   if (key === 'alwaysOnTop') applyAlwaysOnTop();
+  if (key === 'checkUpdates' && value) checkForUpdates();
   sendUiState();
   return true;
 }
@@ -421,6 +434,143 @@ function refreshHookStatus() {
   sendUiState();
 }
 
+// ---------- updates ----------
+// Windows: electron-updater downloads in the background and installs on restart/quit.
+// macOS: the ad-hoc signed app can't update itself, so we only tell the user and open the DMG.
+
+let winUpdater = null;      // electron-updater's autoUpdater (Windows only)
+let macRelease = null;      // { version, downloadUrl, pageUrl } of a newer release (macOS only)
+let manualCheck = false;    // the current check was started by the user, so errors get shown
+let updateCheckRunning = false;
+
+function updatesSupported() {
+  return app.isPackaged || process.env.AGENT_CODY_FORCE_UPDATE_CHECK === '1';
+}
+
+function setUpdate(patch) {
+  update = { ...update, ...patch };
+  sendUiState();
+}
+
+/** One notification per new version, remembered across restarts. */
+function notifyNewVersion(version, body) {
+  if (settings.get('updateNotified') === version) return;
+  settings.set('updateNotified', version);
+  settings.flush();
+  if (manualCheck) return; // they're looking at Settings already
+  notifier.notifyApp({ title: `Agent Cody ${version} is available`, body, onClick: () => showWindow({ expand: true }) });
+}
+
+function updateErrorMessage(err) {
+  const msg = String((err && err.message) || err || '');
+  if (/net::ERR_|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|timed? ?out|aborted/i.test(msg)) {
+    return 'Couldn’t reach GitHub. Check your internet connection and try again.';
+  }
+  if (/\b(403|429)\b|rate limit/i.test(msg)) return 'GitHub is busy right now. Try again in a little while.';
+  return 'Couldn’t check for updates. Try again later.';
+}
+
+function setupWinUpdater() {
+  if (!IS_WIN || winUpdater) return;
+  ({ autoUpdater: winUpdater } = require('electron-updater'));
+  winUpdater.logger = console;
+  winUpdater.autoDownload = true;
+  winUpdater.autoInstallOnAppQuit = true;
+  // From source: reads dev-app-update.yml in the project folder (only with AGENT_CODY_FORCE_UPDATE_CHECK=1).
+  if (!app.isPackaged) winUpdater.forceDevUpdateConfig = true;
+  winUpdater.on('update-available', (info) => setUpdate({ status: 'downloading', version: info.version, message: null }));
+  winUpdater.on('update-not-available', () => setUpdate({ status: 'up-to-date', version: null, message: null }));
+  winUpdater.on('update-downloaded', (info) => {
+    setUpdate({ status: 'ready', version: info.version, message: null });
+    notifyNewVersion(info.version, 'It’s downloaded. Restart Agent Cody to update, or it updates next time you quit.');
+  });
+  // Check errors also reject checkForUpdates() and download errors reject downloadPromise; both are
+  // handled there. This listener only logs (an 'error' event without a listener would throw).
+  winUpdater.on('error', (err) => console.warn('[agent-cody] update:', err && err.message));
+}
+
+/** The Mac's real CPU: an Intel build running under Rosetta on Apple Silicon should get the arm64 DMG. */
+function macArch() { return app.runningUnderARM64Translation ? 'arm64' : process.arch; }
+
+async function checkMac() {
+  const res = await net.fetch(updateCheck.LATEST_RELEASE_URL, {
+    headers: { 'User-Agent': `Agent-Cody/${app.getVersion()}`, Accept: 'application/vnd.github+json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (res.status === 404) { macRelease = null; return setUpdate({ status: 'up-to-date', version: null, message: null }); } // no releases yet
+  if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
+  const json = await res.json();
+  if (!updateCheck.parseLatestRelease(json, macArch())) throw new Error('Unexpected reply from GitHub');
+  macRelease = updateCheck.newerRelease(json, app.getVersion(), macArch());
+  if (!macRelease) return setUpdate({ status: 'up-to-date', version: null, message: null });
+  // Keep the "how to install" message if this version was already being shown.
+  if (update.status !== 'available' || update.version !== macRelease.version) setUpdate({ status: 'available', version: macRelease.version, message: null });
+  notifyNewVersion(macRelease.version, 'Click Download in the Agent Cody widget to get it.');
+}
+
+/** Automatic checks stay silent when something goes wrong; manual ones say what happened. */
+async function checkForUpdates({ manual = false } = {}) {
+  if (!updatesSupported()) {
+    if (manual) setUpdate({ status: 'error', message: 'Updates only work in the installed app.' });
+    return;
+  }
+  if (updateCheckRunning) return;
+  if (update.status === 'ready' || update.status === 'downloading') { if (manual) sendUiState(); return; } // Windows: already on its way
+  updateCheckRunning = true;
+  manualCheck = manual;
+  if (manual) setUpdate({ status: 'checking', message: null });
+  try {
+    if (IS_WIN) {
+      setupWinUpdater();
+      const r = await winUpdater.checkForUpdates();
+      if (!r && manual) setUpdate({ status: 'error', message: 'Updates only work in the installed app.' });
+      if (r && r.downloadPromise) {
+        r.downloadPromise.catch(() => {
+          if (update.status !== 'downloading') return;
+          setUpdate(manual
+            ? { status: 'error', version: null, message: 'Couldn’t download the update. Try again later.' }
+            : { status: 'idle', version: null, message: null }); // quietly try again at the next check
+        });
+      }
+    } else if (IS_MAC) {
+      await checkMac();
+    } else if (manual) {
+      setUpdate({ status: 'error', message: 'Download new versions from the GitHub Releases page.' });
+    }
+  } catch (err) {
+    console.warn('[agent-cody] update check failed:', err && err.message);
+    if (manual) setUpdate({ status: 'error', message: updateErrorMessage(err) }); // automatic: keep whatever we knew
+  } finally {
+    updateCheckRunning = false;
+    manualCheck = false;
+  }
+}
+
+/** macOS: open the DMG in the browser and explain the swap. Windows: install if it's ready. */
+function downloadUpdate() {
+  if (IS_WIN) { if (update.status === 'ready') installUpdate(); else checkForUpdates({ manual: true }); return; }
+  if (!macRelease) return;
+  shell.openExternal(macRelease.downloadUrl).catch(() => shell.openExternal(macRelease.pageUrl).catch(() => {}));
+  setUpdate({
+    message: `When the download finishes: open the DMG, quit Agent Cody, then drag the new Agent Cody into Applications and choose Replace. Your settings and hooks are kept. If macOS asks, allow it in Privacy & Security like the first time.`,
+  });
+  sendToRenderer('toast', 'Downloading in your browser. Open the DMG, quit Agent Cody and drag the new one into Applications. Your settings stay.');
+}
+
+function installUpdate() {
+  if (!IS_WIN || !winUpdater || update.status !== 'ready') return;
+  quitting = true; // otherwise win.on('close') just hides the window
+  settings.flush();
+  setImmediate(() => winUpdater.quitAndInstall(true, true)); // silent install, then start again
+}
+
+function scheduleUpdateChecks() {
+  if (!updatesSupported()) return;
+  const auto = () => { if (settings.get('checkUpdates') !== false) checkForUpdates(); };
+  setTimeout(auto, UPDATE_FIRST_CHECK_MS);
+  setInterval(auto, UPDATE_INTERVAL_MS);
+}
+
 // ---------- IPC ----------
 
 function registerIpc() {
@@ -435,6 +585,9 @@ function registerIpc() {
   ipcMain.on('refresh-ui-state', () => sendUiState()); // e.g. Settings opened: re-read the real login-item state
   ipcMain.on('open-login-items', () => openLoginItemsSettings());
   ipcMain.on('onboarding-answer', (_e, step, yes) => answerOnboarding(String(step), Boolean(yes)));
+  ipcMain.on('check-for-updates', () => checkForUpdates({ manual: true }));
+  ipcMain.on('download-update', () => downloadUpdate());
+  ipcMain.on('install-update', () => installUpdate());
 }
 
 // ---------- startup ----------
@@ -488,4 +641,5 @@ app.whenReady().then(async () => {
   setInterval(() => { for (const n of store.tick()) notifier.notify(n); }, 2000);
   // Hooks can be edited outside the app (CLI, by hand); re-check occasionally.
   setInterval(() => { const s = hooks.status(); if (s !== hookStatus) { hookStatus = s; sendUiState(); } }, 30000);
+  scheduleUpdateChecks();
 });

@@ -1,0 +1,6 @@
+# Only read when running from source on Windows with AGENT_CODY_FORCE_UPDATE_CHECK=1
+# (electron-updater's forceDevUpdateConfig). The installed app uses the app-update.yml
+# that electron-builder generates from the "publish" block in package.json.
+provider: github
+owner: kolb-manu
+repo: Agent-Cody
