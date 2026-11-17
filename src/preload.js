@@ -21,4 +21,9 @@ contextBridge.exposeInMainWorld('cody', {
   checkForUpdates: () => ipcRenderer.send('check-for-updates'),
   downloadUpdate: () => ipcRenderer.send('download-update'),
   installUpdate: () => ipcRenderer.send('install-update'),
+  telegramConnect: () => ipcRenderer.invoke('telegram-connect'),
+  telegramCancel: () => ipcRenderer.send('telegram-cancel'),
+  telegramTest: () => ipcRenderer.invoke('telegram-test'),
+  telegramDisconnect: () => ipcRenderer.send('telegram-disconnect'),
+  telegramSetChatId: (id) => ipcRenderer.invoke('telegram-set-chat-id', id),
 });

@@ -258,7 +258,7 @@ class SessionStore extends EventEmitter {
           s.stopReason = 'interrupted';
           s.turnStartedAt = null;
           s.activity = 'Interrupted';
-          notes.push({ kind: 'stopped', sessionId: s.id, title: `${s.name} was interrupted`, body: describeTool(e.tool_name, ti) });
+          notes.push({ kind: 'stopped', sessionId: s.id, stopReason: s.stopReason, title: `${s.name} was interrupted`, body: describeTool(e.tool_name, ti) });
         } else {
           s.state = 'working'; clearAttention();
           s.activity = `${prefix}${e.tool_name || 'Tool'} failed, continuing`;
@@ -291,7 +291,7 @@ class SessionStore extends EventEmitter {
         s.activity = bg ? `Finished, ${bg} background task${bg > 1 ? 's' : ''} running` : 'Finished';
         s.detail = e.last_assistant_message ? short(e.last_assistant_message, 120) : s.detail;
         if (prevState !== 'done') {
-          notes.push({ kind: 'done', sessionId: s.id, title: `${s.name} finished`, body: short(e.last_assistant_message || 'Claude is done and waiting for you.', 180) });
+          notes.push({ kind: 'done', sessionId: s.id, turnMs: s.turnMs, title: `${s.name} finished`, body: short(e.last_assistant_message || 'Claude is done and waiting for you.', 180) });
         }
         break;
       }
@@ -334,7 +334,7 @@ class SessionStore extends EventEmitter {
         this._end(s, e.reason === 'clear' ? 'Cleared' : 'Session ended', true);
         if (wasBusy && e.reason !== 'clear' && e.reason !== 'resume') s.stopReason = 'ended';
         if (wasBusy && e.reason !== 'clear' && e.reason !== 'resume') {
-          notes.push({ kind: 'stopped', sessionId: s.id, title: `${s.name} ended`, body: 'The session ended while Claude was still working.' });
+          notes.push({ kind: 'stopped', sessionId: s.id, stopReason: s.stopReason, title: `${s.name} ended`, body: 'The session ended while Claude was still working.' });
         }
         break;
       }
@@ -407,7 +407,7 @@ class SessionStore extends EventEmitter {
         const wasBusy = s.state === 'working' || s.state === 'attention';
         this._end(s, 'Claude process exited');
         if (wasBusy) s.stopReason = 'exited';
-        if (wasBusy) notes.push({ kind: 'stopped', sessionId: s.id, title: `${s.name} stopped`, body: 'The Claude Code process exited unexpectedly.' });
+        if (wasBusy) notes.push({ kind: 'stopped', sessionId: s.id, stopReason: s.stopReason, title: `${s.name} stopped`, body: 'The Claude Code process exited unexpectedly.' });
         changed = true;
         continue;
       }

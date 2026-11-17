@@ -1,7 +1,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme, screen, dialog, shell, net } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme, screen, dialog, shell, net, powerMonitor } = require('electron');
 const { SessionStore } = require('./sessions');
 const { startServer } = require('./server');
 const { Settings } = require('./settings');
@@ -11,6 +11,7 @@ const { mascotPNG } = require('./icon-draw');
 const hooks = require('./hooks-installer');
 const { createLoginItem, LOGIN_ARG } = require('./login-item');
 const updateCheck = require('./update-check');
+const telegramLib = require('./telegram');
 
 const IS_MAC = process.platform === 'darwin';
 const IS_WIN = process.platform === 'win32';
@@ -30,7 +31,7 @@ if (IS_WIN) app.setAppUserModelId('com.agentcody.widget');
 let win = null;
 let tray = null;
 let quitting = false;
-let settings, store, notifier;
+let settings, store, notifier, telegram;
 let serverError = null;
 let hookStatus = 'not-installed';
 let previewTheme = null; // transient theme override from the simulator showcase
@@ -242,6 +243,7 @@ function sendUiState() {
     appVersion: app.getVersion(),
     checkUpdates: settings.get('checkUpdates') !== false,
     update,
+    telegram: telegram ? telegram.state() : { available: false }, // never the token or chat ID
   });
   updateTrayMenu();
 }
@@ -588,13 +590,18 @@ function registerIpc() {
   ipcMain.on('check-for-updates', () => checkForUpdates({ manual: true }));
   ipcMain.on('download-update', () => downloadUpdate());
   ipcMain.on('install-update', () => installUpdate());
+  ipcMain.handle('telegram-connect', () => telegram.connect());
+  ipcMain.on('telegram-cancel', () => telegram.cancel());
+  ipcMain.handle('telegram-test', () => telegram.test());
+  ipcMain.on('telegram-disconnect', () => telegram.disconnect());
+  ipcMain.handle('telegram-set-chat-id', (_e, id) => telegram.setChatId(String(id == null ? '' : id).slice(0, 32)));
 }
 
 // ---------- startup ----------
 
 // Only one copy runs: a second launch just brings the widget forward (unless it's a login start).
 app.on('second-instance', (_e, argv) => { if (!argv.includes(LOGIN_ARG)) showWindow({ expand: true }); });
-app.on('before-quit', () => { quitting = true; settings && settings.flush(); });
+app.on('before-quit', () => { quitting = true; telegram && telegram.cancel(); settings && settings.flush(); });
 app.on('window-all-closed', (e) => e.preventDefault?.());
 app.on('activate', () => showWindow());
 
@@ -609,7 +616,15 @@ app.whenReady().then(async () => {
     staleMs: settings.get('staleMinutes') * 60 * 1000,
     fadeMs: settings.get('fadeSeconds') * 1000,
   });
-  notifier = new Notifier({ settings, onClick: (id) => openSession(id, { fromNotification: true }) });
+  telegram = new telegramLib.TelegramService({
+    token: telegramLib.loadToken(),
+    settings,
+    fetch: (...args) => fetch(...args),
+    openExternal: (url) => shell.openExternal(url),
+    idleSeconds: () => powerMonitor.getSystemIdleTime(),
+    onChange: () => sendUiState(),
+  });
+  notifier = new Notifier({ settings, telegram, onClick: (id) => openSession(id, { fromNotification: true }) });
   store.on('change', scheduleSessionsSend);
 
   buildIcons();

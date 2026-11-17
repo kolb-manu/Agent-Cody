@@ -10,7 +10,7 @@
   <div id="expanded">
     <header class="titlebar">
       <div class="brand">
-        <span class="spark" id="spark"></span>
+        <span class="spark" id="spark" aria-hidden="true"></span>
         <span class="title">Agent Cody</span>
         <span class="count" id="count"></span>
       </div>
@@ -61,6 +61,31 @@
         <label class="switch-row"><span>Stops or errors</span><input type="checkbox" role="switch" data-setting="notify.stopped"></label>
         <label class="switch-row"><span>Finishes</span><input type="checkbox" role="switch" data-setting="notify.finished"></label>
         <label class="switch-row"><span>Play a sound</span><input type="checkbox" role="switch" data-setting="sound"></label>
+      </div>
+
+      <div class="group" id="tg-group">
+        <div class="label">Telegram</div>
+        <div class="tg-status-row">
+          <span id="tg-status" class="hook-status" role="status"></span>
+          <button id="tg-reconnect" class="link inline" hidden>Reconnect</button>
+        </div>
+        <div class="tg-actions" id="tg-actions">
+          <button id="tg-connect" class="btn primary" hidden>Connect Telegram</button>
+          <button id="tg-cancel" class="btn subtle" hidden>Cancel</button>
+          <button id="tg-test" class="btn" hidden>Send test message</button>
+          <button id="tg-disconnect" class="btn subtle" hidden>Disconnect</button>
+        </div>
+        <button id="tg-manual-link" class="link" hidden>Enter chat ID instead</button>
+        <form id="tg-manual" class="tg-manual" hidden>
+          <input id="tg-chat-id" class="text-input" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Chat ID, e.g. 123456789" aria-label="Telegram chat ID">
+          <button id="tg-save" class="btn" type="submit">Save &amp; test</button>
+        </form>
+        <div id="tg-switches" hidden>
+          <label class="switch-row"><span>Send alerts to Telegram</span><input type="checkbox" role="switch" data-setting="telegram.enabled"></label>
+          <label class="switch-row"><span>Only when I’m away</span><input type="checkbox" role="switch" data-setting="telegram.onlyWhenAway"></label>
+          <label class="switch-row"><span>Include Claude’s last message</span><input type="checkbox" role="switch" data-setting="telegram.includePreview"></label>
+        </div>
+        <p class="note" id="tg-note">Alerts go through Telegram’s servers. They include the project folder name and, if you allow it, a preview of Claude’s last message.</p>
       </div>
 
       <div class="group">

@@ -84,3 +84,34 @@ test('setUser validates keys and values and persists', () => {
   assert.equal(again.get('notify.finished'), true);
   assert.equal(again.get('notify.attention'), true);
 });
+
+test('telegram defaults: not connected, alerts on, previews on, not only-when-away', () => {
+  const s = new Settings(dir());
+  assert.deepEqual(s.get('telegram'), { chatId: null, name: null, enabled: true, onlyWhenAway: false, includePreview: true, disconnected: false });
+});
+
+test('telegram settings merge with defaults (older or partial files)', () => {
+  const d = dir();
+  fs.writeFileSync(path.join(d, 'settings.json'), JSON.stringify({ theme: 'dark', telegram: { chatId: 42, name: '@me', onlyWhenAway: true } }));
+  assert.deepEqual(new Settings(d).get('telegram'), { chatId: 42, name: '@me', enabled: true, onlyWhenAway: true, includePreview: true, disconnected: false });
+
+  const old = dir();
+  fs.writeFileSync(path.join(old, 'settings.json'), JSON.stringify({ theme: 'dark' }));
+  assert.equal(new Settings(old).get('telegram.enabled'), true);
+  assert.equal(new Settings(old).get('telegram.chatId'), null);
+});
+
+test('telegram switches are validated booleans; chat ID, name and disconnected are not UI-editable', () => {
+  const d = dir();
+  const s = new Settings(d);
+  assert.equal(s.setUser('telegram.enabled', false), true);
+  assert.equal(s.setUser('telegram.onlyWhenAway', true), true);
+  assert.equal(s.setUser('telegram.includePreview', false), true);
+  assert.equal(s.setUser('telegram.enabled', 'yes'), false);
+  assert.equal(s.setUser('telegram.chatId', 123), false);
+  assert.equal(s.setUser('telegram.name', '@evil'), false);
+  assert.equal(s.setUser('telegram.disconnected', false), false);
+  assert.equal(s.setUser('telegram', { chatId: 1 }), false);
+  s.flush();
+  assert.deepEqual(new Settings(d).get('telegram'), { chatId: null, name: null, enabled: false, onlyWhenAway: true, includePreview: false, disconnected: false });
+});

@@ -34,7 +34,7 @@ That's it. Follow the run under the repo's **Actions** tab (it takes about 10–
 ## What the workflow does
 
 1. **Unit tests** (`npm test`) on Linux, plus a check that the tag matches `package.json`. If either fails, nothing gets built or published.
-2. **Build** on a macOS runner and a Windows runner in parallel with electron-builder.
+2. **Build** on a macOS runner and a Windows runner in parallel with electron-builder. The Telegram bot token is written into the app first (see [Telegram alerts](#telegram-alerts)).
    - The Mac apps are *ad-hoc* signed, which is free and needs no certificate. This keeps the app bundle valid, so friends get the normal "unidentified developer" prompt instead of an "app is damaged" error.
    - Each build is smoke-tested: the packaged app is started, and the workflow checks that its local server answers. The Windows smoke test doesn't block a release, because CI desktop sessions can be unreliable.
 3. **Release:** creates the GitHub Release for the tag and attaches all installers. If the release already exists (for example after re-running a failed job), the files are replaced.
@@ -63,9 +63,36 @@ Things to keep in mind:
 - **Windows, for real:** this can only be tested once two updater-enabled releases exist. Install 0.2.0, publish 0.2.1 (a pre-release won't do, see above), then start 0.2.0. About 10 seconds later it shows "Agent Cody 0.2.1 is ready · Restart to update". The updater logs to the console. When the app is installed, electron-updater also writes `%LOCALAPPDATA%\agent-cody-updater\` (downloads) for debugging.
 - **CI:** a manual run of the workflow on a branch checks that `latest.yml` points at the built `.exe`, that the `.blockmap` exists, and that `app-update.yml` is inside the app.
 
+## Telegram alerts
+
+Telegram alerts use one shared bot, **@agentcodyalertsbot**. Each copy of the app talks to the Bot API directly; there is no server.
+
+**The `TELEGRAM_BOT_TOKEN` repository secret is required for releases.** (GitHub → repo **Settings → Secrets and variables → Actions → New repository secret**, name `TELEGRAM_BOT_TOKEN`, value = the token from BotFather.) Before `electron-builder`, both build jobs run `scripts/write-telegram-config.js`, which writes the token to `src/main/telegram-config.json` (gitignored) so it gets packaged. Then `scripts/check-telegram-config.js` checks the file is inside every `app.asar`. Neither prints the token, and GitHub masks secrets in logs anyway.
+
+- **Tag builds fail** if the secret is missing or doesn't look like a bot token, so a release never ships without Telegram.
+- **Manual runs on a branch** only warn and build without Telegram. Settings then says "Telegram isn’t available in this build".
+
+**Running from source:** the app reads the token from `AGENT_CODY_TELEGRAM_TOKEN` first, then `src/main/telegram-config.json`.
+
+```bash
+AGENT_CODY_TELEGRAM_TOKEN='123456:ABC…' npm start
+# or write the config file once (it's gitignored):
+TELEGRAM_BOT_TOKEN='123456:ABC…' node scripts/write-telegram-config.js
+```
+
+Use `AGENT_CODY_USER_DATA=/tmp/cody-test` as well to try the connect flow without touching your real settings. Without a token, everything except Telegram works as usual.
+
+**Accepted risk:** the token is inside every installed app, so anyone who has the app could dig it out of the bundle and send messages as the bot or read its pending updates (which contain other people's `/start` codes). That's acceptable for a handful of friends. Nobody can read your Telegram chats with it, only what was sent to the bot.
+
+**Rotating the token** (if it leaks, or someone leaves the group):
+
+1. In Telegram, open **@BotFather** → `/mybots` → **@agentcodyalertsbot** → **API Token** → **Revoke current token**. The old token stops working immediately, so alerts stop in all installed copies.
+2. Update the `TELEGRAM_BOT_TOKEN` secret on GitHub with the new token (and your local `AGENT_CODY_TELEGRAM_TOKEN` / `telegram-config.json`).
+3. Publish a new release. Windows copies update themselves; Mac users install it from the update banner. Everyone stays connected: their chat ID doesn't change, so there's no need to reconnect.
+
 ## Notes
 
-- **No signing, no secrets.** Friends will see a first-launch warning; the README explains how to get past it. To add real signing later, add the electron-builder signing secrets (`CSC_LINK`, `CSC_KEY_PASSWORD`, plus Apple notarization). Then remove `"identity": "-"` and `"hardenedRuntime": false` from the `mac` section of `package.json`, and drop `CSC_IDENTITY_AUTO_DISCOVERY` from the workflow.
+- **No signing.** The only secret is `TELEGRAM_BOT_TOKEN` (see above). Friends will see a first-launch warning; the README explains how to get past it. To add real signing later, add the electron-builder signing secrets (`CSC_LINK`, `CSC_KEY_PASSWORD`, plus Apple notarization). Then remove `"identity": "-"` and `"hardenedRuntime": false` from the `mac` section of `package.json`, and drop `CSC_IDENTITY_AUTO_DISCOVERY` from the workflow.
 - **Made a mistake?** Delete the release and the tag on GitHub, fix the problem, then tag and push again:
   ```bash
   git tag -d v1.0.1 && git push origin :refs/tags/v1.0.1

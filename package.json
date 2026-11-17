@@ -15,7 +15,7 @@
     "hooks:install": "node scripts/hooks-cli.js install",
     "hooks:uninstall": "node scripts/hooks-cli.js uninstall",
     "hooks:status": "node scripts/hooks-cli.js status",
-    "icons": "node scripts/make-icons.js",
+    "icons": "python3 scripts/make-icons.py",
     "test": "node --test test/*.test.js",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",

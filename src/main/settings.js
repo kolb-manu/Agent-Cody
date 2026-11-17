@@ -22,6 +22,8 @@ const DEFAULTS = {
   bounds: null,             // {x, y, width, height} of the expanded window
   checkUpdates: true,       // look for new versions on launch and every few hours
   updateNotified: null,     // last version we showed a "new version" notification for
+  // Telegram alerts. chatId/name/disconnected are only ever set by the main process (telegram.js).
+  telegram: { chatId: null, name: null, enabled: true, onlyWhenAway: false, includePreview: true, disconnected: false },
 };
 
 /** Keys the UI may change, with validators. */
@@ -33,6 +35,9 @@ const USER_SETTINGS = {
   'notify.attention': (v) => typeof v === 'boolean',
   'notify.stopped': (v) => typeof v === 'boolean',
   'notify.finished': (v) => typeof v === 'boolean',
+  'telegram.enabled': (v) => typeof v === 'boolean',
+  'telegram.onlyWhenAway': (v) => typeof v === 'boolean',
+  'telegram.includePreview': (v) => typeof v === 'boolean',
 };
 
 const AGENT_CODY_DIR = path.join(os.homedir(), '.agent-cody');
@@ -65,7 +70,7 @@ function migrate(loaded) {
 class Settings {
   constructor(dir) {
     this.file = path.join(dir, 'settings.json');
-    this.data = { ...DEFAULTS, notify: { ...DEFAULTS.notify }, onboarding: { ...DEFAULTS.onboarding } };
+    this.data = { ...DEFAULTS, notify: { ...DEFAULTS.notify }, onboarding: { ...DEFAULTS.onboarding }, telegram: { ...DEFAULTS.telegram } };
     this.firstRun = true;
     try {
       const loaded = migrate(JSON.parse(fs.readFileSync(this.file, 'utf8')));
@@ -73,6 +78,7 @@ class Settings {
         ...DEFAULTS, ...loaded,
         notify: { ...DEFAULTS.notify, ...(loaded.notify || {}) },
         onboarding: { ...DEFAULTS.onboarding, ...(loaded.onboarding || {}) },
+        telegram: { ...DEFAULTS.telegram, ...(loaded.telegram || {}) },
       };
       this.firstRun = false;
     } catch (_) { /* first run or unreadable: defaults */ }

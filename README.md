@@ -15,6 +15,7 @@
 - 👀 Shows a live list of every Claude Code session running on your computer.
 - 📊 Progress bars show how far each agent is (for example "3/5" steps done).
 - 🔔 Sends a notification when an agent needs your permission, asks you something, or stops.
+- 📱 Can send the same alerts to your phone through Telegram, so you know even when you've walked away.
 - 🪟 Click **Open** to jump straight back to that agent's window.
 - 🌗 Light and dark mode, or follows your computer's setting.
 
@@ -81,12 +82,28 @@ Each row is one agent. The coloured dot tells you how it's doing:
 - **Theme:** the moon/sun button switches light and dark. In **Settings** (gear icon) you can pick **System** to follow your computer.
 - **Start at login:** turn it on or off any time in **Settings**.
 
+## Telegram alerts
+
+Get your alerts on your phone, so you know when an agent needs you even if you're away from the computer.
+
+1. Open **Settings** (gear icon) and click **Connect Telegram**.
+2. Telegram opens the **@agentcodyalertsbot** chat. Tap **Start**.
+3. That's it. A few seconds later Agent Cody says *Connected as @yourname*, and the bot sends you a confirmation.
+
+You only get alerts from your own computer. They follow the same switches as the desktop notifications (needs permission, stops, finishes). Under **Settings → Telegram** you can also:
+
+- **Only when I’m away**: send to Telegram only if you haven't touched the computer for 2 minutes. Alerts that come in while you're at your desk aren't sent later.
+- **Include Claude’s last message**: turn it off to get just the project name and status.
+- **Send test message**, or **Disconnect**.
+
+Alerts go through Telegram’s servers. They include the project folder name and, if you allow it, a preview of Claude’s last message. If you block the bot, Settings shows *Telegram disconnected* and you can **Reconnect** any time. Didn't work? Click **Enter chat ID instead** and type your chat ID (ask the friend who set up the bot how to find it).
+
 ## Good to know
 
 - **It needs Node.js.** Node.js is a free program that the hooks use to run. If you don't have it, download the "LTS" version from [nodejs.org](https://nodejs.org) and install it like any other app.
 - **It only works with Claude Code** (in the terminal or your code editor), not with the normal Claude chat or Cowork.
 - **Progress bars only fill up when Claude makes a to-do list.** Otherwise you see a gentle moving bar and the word "working".
-- **Everything stays on your computer.** No account, and it uses none of your Claude usage. The only thing it asks the internet is whether there's a new version (on GitHub).
+- **Everything stays on your computer** unless you connect Telegram. No account, and it uses none of your Claude usage. Otherwise the only thing it asks the internet is whether there's a new version (on GitHub).
 
 ## Troubleshooting
 
@@ -233,6 +250,9 @@ Row states:
 | Keep on top of other windows | On |
 | Start when I log in | Off, unless you said Yes on first launch |
 | Updates: Check automatically (10 s after start, then every 6 hours) | On |
+| Telegram: Send alerts to Telegram (once connected) | On |
+| Telegram: Only when I’m away (idle 2+ minutes) | Off |
+| Telegram: Include Claude’s last message | On |
 
 All settings persist between launches.
 
@@ -271,7 +291,8 @@ Settings live in `settings.json` in the app's data folder (tray → **Open setti
   "openAtLogin": true,
   "staleMinutes": 10,
   "fadeSeconds": 8,
-  "checkUpdates": true
+  "checkUpdates": true,
+  "telegram": { "chatId": null, "name": null, "enabled": true, "onlyWhenAway": false, "includePreview": true, "disconnected": false }
 }
 ```
 
@@ -282,7 +303,7 @@ Most of these can be changed in the Settings panel. Edit `port`, `staleMinutes` 
 Releases are built and published automatically by GitHub Actions when you push a version tag. See **[RELEASING.md](RELEASING.md)**. The commands below are for local builds.
 
 ```bash
-npm run icons      # regenerates build/icon.png (already committed; only needed if you change the icon)
+npm run icons      # rebuilds the app icons from build/logo/agent-cody-ping.png (needs Python + Pillow; already committed)
 npm run dist:mac   # → dist/Agent-Cody-<version>-mac-arm64.dmg and dist/Agent-Cody-<version>-mac-x64.dmg
 npm run dist:win   # → dist/Agent-Cody-<version>-win-x64.exe (per-user installer)
 npm run pack       # unpacked app for the current OS, for quick testing
@@ -308,6 +329,7 @@ Claude Code ──hook (stdin JSON)──▶ node ~/.agent-cody/agent-cody-hook.
 - `src/main/hooks-installer.js`: safe merge into, and removal from, `~/.claude/settings.json`.
 - `src/main/focus.js`: best-effort window focusing (tty matching, editor folders, app activation).
 - `src/main/settings.js`: persisted settings with validation and migration.
+- `src/main/telegram.js`: Telegram alerts (connect flow, message text, Bot API calls and retries), pure with an injected `fetch` and unit-tested. Run with `AGENT_CODY_TELEGRAM_TOKEN=<token> npm start`; see [RELEASING.md](RELEASING.md#telegram-alerts).
 - `src/main/update-check.js`: macOS update check (version comparison, picking the DMG), pure and unit-tested. Windows uses `electron-updater`.
 - `src/main/main.js`: window, tray, IPC and notifications wiring. `src/renderer/`: the UI.
 
@@ -315,7 +337,7 @@ Run the tests with `npm test`. They cover the reducer (states, turn timing, stop
 
 ### Privacy
 
-Everything stays on your machine. The hook sends only the session id, project path, event name, tool name, short descriptions (file name, command or description, search pattern, truncated prompt or last message), to-do statuses, and terminal identification for the Open button. It never sends file contents, diffs or transcripts. The only outbound request is the update check: on macOS a GET to `api.github.com/repos/kolb-manu/Agent-Cody/releases/latest`, on Windows electron-updater reading `latest.yml` from the GitHub Release (and downloading the installer). No session data is sent, and it can be turned off in Settings. Running from source never checks unless `AGENT_CODY_FORCE_UPDATE_CHECK=1` is set. See [RELEASING.md](RELEASING.md#in-app-updates).
+Everything stays on your machine. The hook sends only the session id, project path, event name, tool name, short descriptions (file name, command or description, search pattern, truncated prompt or last message), to-do statuses, and terminal identification for the Open button. It never sends file contents, diffs or transcripts. The only outbound request is the update check: on macOS a GET to `api.github.com/repos/kolb-manu/Agent-Cody/releases/latest`, on Windows electron-updater reading `latest.yml` from the GitHub Release (and downloading the installer). No session data is sent, and it can be turned off in Settings. If you connect Telegram, alerts (title, status and, if allowed, the notification text with the project folder name) are sent to `api.telegram.org`, only to your own chat; while the Connect flow runs the app also reads the bot's pending messages to find your `/start`. Running from source never checks unless `AGENT_CODY_FORCE_UPDATE_CHECK=1` is set. See [RELEASING.md](RELEASING.md#in-app-updates).
 
 ### Technical limitations
 

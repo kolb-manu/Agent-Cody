@@ -12,8 +12,14 @@ const els = {
 
 // ---------- icons (static markup only; session data is always set via textContent) ----------
 const ICON = {
-  spark: '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><g transform="translate(8 8)">' +
-    [0, 30, 60, 90, 120, 150].map((a) => `<rect x="-0.9" y="-7.2" width="1.8" height="14.4" rx="0.9" transform="rotate(${a})"/>`).join('') +
+  // Agent Cody "ping" logo (build/logo/agent-cody-ping.svg) on a rounded tile.
+  spark: '<svg viewBox="0 0 160 160" aria-hidden="true"><rect width="160" height="160" rx="36" fill="#D97757"/>' +
+    '<g transform="translate(80 80) scale(0.85) translate(-80 -76)" stroke="#FAF4EE" stroke-linecap="round" fill="none">' +
+    '<path d="M64 22 Q56 34 64 46" stroke-width="7"/><path d="M96 22 Q104 34 96 46" stroke-width="7"/>' +
+    '<path d="M52 14 Q40 34 52 54" stroke-width="7"/><path d="M108 14 Q120 34 108 54" stroke-width="7"/>' +
+    '<line x1="80" y1="70" x2="80" y2="44" stroke-width="8"/><circle cx="80" cy="34" r="10" fill="#FAF4EE" stroke="none"/>' +
+    '<rect x="30" y="70" width="100" height="68" rx="22" fill="#FAF4EE" stroke="none"/>' +
+    '<circle cx="60" cy="104" r="10" fill="#D97757" stroke="none"/><circle cx="100" cy="104" r="10" fill="#D97757" stroke="none"/>' +
     '</g></svg>',
   moon: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M13.2 9.6A5.6 5.6 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8z"/></svg>',
   sun: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="2.8"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg>',
@@ -289,9 +295,11 @@ function renderUi() {
   for (const b of document.querySelectorAll('[data-theme-choice]')) b.setAttribute('aria-checked', String(b.dataset.themeChoice === ui.theme));
   for (const input of document.querySelectorAll('[data-setting]')) {
     const k = input.dataset.setting;
-    input.checked = k.startsWith('notify.') ? Boolean((ui.notify || {})[k.slice(7)]) : Boolean(ui[k]);
+    const [group, key] = k.split('.');
+    input.checked = key ? Boolean((ui[group] || {})[key]) : Boolean(ui[k]);
   }
   renderLoginItem();
+  renderTelegram();
   const hs = $('hook-status');
   hs.textContent = { installed: 'Installed', partial: 'Partly installed', 'not-installed': 'Not installed', error: 'settings.json unreadable' }[ui.hookStatus] || ui.hookStatus;
   hs.className = `hook-status ${ui.hookStatus === 'installed' ? 'ok' : 'warn'}`;
@@ -337,6 +345,56 @@ function renderUpdate() {
   btn.className = upd.status === 'ready' || upd.status === 'available' ? 'btn primary' : 'btn';
   btn.disabled = upd.status === 'checking' || upd.status === 'downloading';
   btn.dataset.action = upd.status === 'ready' ? 'install' : upd.status === 'available' ? 'download' : 'check';
+}
+
+// ---------- Telegram ----------
+let tgBusy = false;       // a test / save request is in flight
+let tgManualOpen = false; // the "Enter chat ID instead" field is showing
+
+function renderTelegram() {
+  const tg = ui.telegram || { available: false };
+  const status = $('tg-status');
+  const show = (id, on) => { $(id).hidden = !on; };
+  const idle = tg.available && !tg.connecting;
+  let text = '', cls = 'hook-status';
+  if (!tg.available) { text = 'Telegram isn’t available in this build'; cls += ' muted'; }
+  else if (tg.connecting) { text = 'Waiting for you to tap Start in Telegram…'; cls += ' muted'; }
+  else if (tg.connected) { text = `Connected as ${tg.name || 'Telegram'}`; cls += ' ok'; }
+  else if (tg.disconnected) { text = 'Telegram disconnected ·'; cls += ' warn'; }
+  else { text = 'Get alerts on your phone, even when you’re away from the computer.'; cls += ' muted'; }
+  status.textContent = text;
+  status.className = cls;
+
+  show('tg-reconnect', idle && !tg.connected && tg.disconnected);
+  show('tg-connect', idle && !tg.connected && !tg.disconnected);
+  show('tg-cancel', tg.available && tg.connecting);
+  show('tg-test', idle && tg.connected);
+  show('tg-disconnect', idle && (tg.connected || tg.disconnected));
+  $('tg-actions').classList.toggle('none', [...$('tg-actions').children].every((b) => b.hidden));
+  show('tg-manual-link', idle && !tg.connected && !tgManualOpen);
+  show('tg-manual', idle && !tg.connected && tgManualOpen);
+  show('tg-switches', tg.available && tg.connected);
+  show('tg-note', tg.available);
+  for (const id of ['tg-test', 'tg-save']) $(id).disabled = tgBusy;
+}
+
+async function telegramConnect() {
+  tgManualOpen = false;
+  const r = await cody.telegramConnect();
+  if (r && r.ok) toast(`Connected as ${r.name}. Check Telegram for the confirmation.`);
+  else if (r && !r.cancelled && r.message) toast(r.message);
+}
+
+async function telegramRequest(fn) {
+  if (tgBusy) return;
+  tgBusy = true; renderTelegram();
+  try {
+    const r = await fn();
+    if (r && r.message) toast(r.message);
+    return r;
+  } finally {
+    tgBusy = false; renderTelegram();
+  }
 }
 
 function runUpdateAction(action) {
@@ -388,6 +446,17 @@ els.banner.addEventListener('click', () => {
   else if (action === 'install' || action === 'download') runUpdateAction(action);
 });
 $('btn-update').addEventListener('click', (e) => runUpdateAction(e.currentTarget.dataset.action));
+$('tg-connect').addEventListener('click', () => telegramConnect());
+$('tg-reconnect').addEventListener('click', () => telegramConnect());
+$('tg-cancel').addEventListener('click', () => cody.telegramCancel());
+$('tg-test').addEventListener('click', () => telegramRequest(() => cody.telegramTest()));
+$('tg-disconnect').addEventListener('click', () => cody.telegramDisconnect());
+$('tg-manual-link').addEventListener('click', () => { tgManualOpen = true; renderTelegram(); $('tg-chat-id').focus(); });
+$('tg-manual').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const r = await telegramRequest(() => cody.telegramSetChatId($('tg-chat-id').value));
+  if (r && r.ok) { tgManualOpen = false; $('tg-chat-id').value = ''; renderTelegram(); }
+});
 for (const b of document.querySelectorAll('[data-theme-choice]')) b.addEventListener('click', () => cody.setSetting('theme', b.dataset.themeChoice));
 for (const input of document.querySelectorAll('[data-setting]')) input.addEventListener('change', () => cody.setSetting(input.dataset.setting, input.checked));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && view === 'settings') { view = 'list'; renderView(); } });
