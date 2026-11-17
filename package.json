@@ -1,7 +1,7 @@
 {
   "name": "agent-cody",
   "productName": "Agent Cody",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Desktop widget showing live progress of every Claude Code session on this machine.",
   "main": "src/main/main.js",
   "private": true,
